@@ -12,7 +12,7 @@ import {
   signInWithGoogle,
   signInWithGoogleRedirect,
 } from './lib/firebase';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDocs, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 
 interface Message {
@@ -36,7 +36,7 @@ const UPCOMING_SHOWS = [
     name: '2026 Gala: "Freedom Has No Rehearsal"', 
     description: 'Saturday April 25th, 2026 at the Trenton War Memorial. Celebrating Season 41: "Not Afraid".',
     thumbnailLink: 'https://res.cloudinary.com/onthestage/image/upload/v1772576647/orgpageimage/aod5l3awtwvimqtengbv.jpg',
-    link: 'https://www.passagetheatre.org/shows-events',
+    link: 'https://www.onthestage.tickets/show/passage-theatre-company/6994b61ef680c05543ae0156',
     mimeType: 'image/jpeg'
   },
   { 
@@ -52,7 +52,7 @@ const UPCOMING_SHOWS = [
     name: 'Muleheaded', 
     description: 'A powerful new production exploring resilience and determination. Part of our Season 41 lineup.',
     thumbnailLink: 'https://static.wixstatic.com/media/f5611b_6751971f47bc41ae894e33a08cff2f55~mv2.png/v1/fill/w_810,h_1012,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Muleheaded.png',
-    link: 'https://www.passagetheatre.org/shows-events',
+    link: null,
     mimeType: 'image/png'
   },
   { 
@@ -60,7 +60,7 @@ const UPCOMING_SHOWS = [
     name: 'The Dutchman', 
     description: 'Amiri Baraka\'s classic play. A tense, symbolic encounter on a New York subway.',
     thumbnailLink: 'https://static.wixstatic.com/media/f5611b_0f67008f4c6c4253a5b95a1d33cc51a6~mv2.png/v1/fill/w_810,h_1012,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Dutchman.png',
-    link: 'https://www.passagetheatre.org/shows-events',
+    link: null,
     mimeType: 'image/png'
   }
 ];
@@ -72,6 +72,7 @@ export default function App() {
   const [mode, setMode] = useState<'public' | 'internal'>('public');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -422,6 +423,22 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
+  const handleSignOut = async () => {
+    try {
+      // Clear server-side Drive session (if any)
+      await fetch('/api/auth/logout').catch(() => {});
+      // Clear Firebase auth
+      if (auth) await signOut(auth);
+    } finally {
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setIsAccountMenuOpen(false);
+      setSessions([]);
+      exitChat();
+      setMode('public');
+    }
+  };
+
   const deleteSession = async (sessionId: string) => {
     if (!db || !currentUser) return;
     const ok = window.confirm('Delete this chat? This cannot be undone.');
@@ -562,6 +579,10 @@ export default function App() {
 
   const handleSubmit = async (e?: FormEvent) => {
     e?.preventDefault();
+    if (mode === 'internal' && !isAuthenticated) {
+      alert('Internal mode requires sign-in. Please log in, then try again.');
+      return;
+    }
     if ((!input.trim() && !selectedImage) || isLoading) return;
 
     let sessionId = currentSessionId;
@@ -743,52 +764,61 @@ export default function App() {
           </div>
         </div>
         
-        <div className="flex items-center gap-1 sm:gap-2 p-1 bg-white/5 rounded-full border border-white/10 scale-90 sm:scale-100">
-          <button 
-            onClick={() => setMode('public')}
-            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
-              mode === 'public' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
-            }`}
-          >
-            <Globe className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Public</span>
-          </button>
-          <button 
-            onClick={() => setMode('internal')}
-            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
-              mode === 'internal' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
-            }`}
-          >
-            <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Internal</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 sm:gap-4">
-          {messages.length > 0 && (
+        <div className="flex items-center gap-2 sm:gap-3 scale-90 sm:scale-100">
+          {mode === 'public' && (
             <button
               type="button"
               onClick={exitChat}
-              className="p-2 hover:bg-white/10 rounded-xl text-stone-400"
-              title="Exit chat"
-              aria-label="Exit chat"
+              className="p-2 text-stone-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-accent/60 rounded-full"
+              title="Home"
+              aria-label="Home — return to start"
             >
               <Home className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           )}
+          <div className="flex items-center gap-1 sm:gap-2 p-1 bg-white/5 rounded-full border border-white/10">
+            <button 
+              onClick={() => setMode('public')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
+                mode === 'public' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              <Globe className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Public</span>
+            </button>
+            <button 
+              onClick={() => setMode('internal')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
+                mode === 'internal' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Internal</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 sm:gap-4">
           <button
             type="button"
             onClick={resetConversation}
-            className="p-2 hover:bg-white/10 rounded-xl text-stone-400"
+            className="flex items-center gap-2 p-2 hover:bg-white/10 rounded-xl text-stone-400"
             title="New chat"
             aria-label="New chat"
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="hidden sm:inline text-[10px] uppercase tracking-widest">New</span>
           </button>
-          <button 
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-white/10 rounded-xl text-stone-400"
-          >
-            <History className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
+          {mode === 'internal' && (
+            <button 
+              type="button"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="flex items-center gap-2 p-2 hover:bg-white/10 rounded-xl text-stone-400"
+              title="Chat history"
+              aria-label="Chat history"
+            >
+              <History className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="hidden sm:inline text-[10px] uppercase tracking-widest">History</span>
+            </button>
+          )}
           {mode === 'internal' && !isAuthenticated && (
             <div className="flex items-center gap-2">
               <button 
@@ -810,8 +840,40 @@ export default function App() {
               </button>
             </div>
           )}
-          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-white/10 flex items-center justify-center overflow-hidden">
-            <img src={currentUser?.photoURL || "/passage-building.jpg"} alt="User" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsAccountMenuOpen(v => !v)}
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-white/10 flex items-center justify-center overflow-hidden hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-accent/60"
+              aria-label={currentUser ? "Account menu" : "Profile"}
+              title={currentUser ? "Account" : "Profile"}
+            >
+              <img src={currentUser?.photoURL || "/passage-building.jpg"} alt="User" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+            </button>
+
+            {isAccountMenuOpen && currentUser && (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-label="Close account menu"
+                  onClick={() => setIsAccountMenuOpen(false)}
+                />
+                <div className="absolute right-0 mt-2 z-50 min-w-44 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+                  <div className="px-3 py-2 border-b border-white/5">
+                    <div className="text-[10px] uppercase tracking-widest text-stone-500">Signed in</div>
+                    <div className="text-xs text-white truncate">{currentUser.email || currentUser.displayName || 'Google account'}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="w-full text-left px-3 py-2.5 text-xs text-stone-300 hover:bg-white/10 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -822,7 +884,7 @@ export default function App() {
           
           {/* Sidebar for Chat History (Mobile Overlay / Desktop Sidebar for Internal) */}
           <AnimatePresence>
-            {(isSidebarOpen || (mode === 'internal' && typeof window !== 'undefined' && window.innerWidth >= 1024)) && (
+            {(isSidebarOpen || (typeof window !== 'undefined' && window.innerWidth >= 1024)) && (
               <motion.div 
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -830,8 +892,10 @@ export default function App() {
                 className={`
                   ${isSidebarOpen ? 'fixed inset-y-0 left-0 z-50 w-72 bg-[#05020a] p-6' : 'hidden lg:flex w-64 p-4'}
                   glass rounded-r-3xl lg:rounded-3xl flex flex-col gap-4 overflow-hidden
+                  ${(!isSidebarOpen && mode !== 'internal') ? 'lg:opacity-0 lg:pointer-events-none' : ''}
                 `}
               >
+                {/* Keep sidebar width reserved on desktop to prevent center jump when toggling modes */}
                 <div className="flex items-center justify-between px-2">
                   <h3 className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-semibold">History</h3>
                   <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-stone-500"><X className="w-4 h-4" /></button>
@@ -928,14 +992,15 @@ export default function App() {
                 {/* Hover/Click Trigger Area */}
                 <button
                   type="button"
-                  className="fixed left-0 top-20 bottom-20 w-12 z-40 cursor-pointer group focus:outline-none"
+                  className="fixed left-0 top-24 bottom-24 w-12 z-[5] cursor-pointer group focus:outline-none"
                   onMouseEnter={() => setIsEventsOpen(true)}
                   onClick={() => setIsEventsPinnedOpen(v => !v)}
                   aria-label="Open Upcoming Events"
                   title="Upcoming Events"
                 >
-                  <div className="absolute left-2 top-1/2 -translate-y-1/2 h-28 w-1.5 rounded-full bg-accent/40 shadow-[0_0_18px_rgba(139,92,246,0.55)] group-hover:bg-accent/80 group-hover:shadow-[0_0_28px_rgba(139,92,246,0.85)] transition-all" />
-                  <div className="absolute left-1.5 top-1/2 -translate-y-1/2 h-28 w-3 rounded-full bg-accent/10 blur-[6px] opacity-80 group-hover:opacity-100 transition-opacity" />
+                  {/* Full-height strip (matches this trigger’s vertical span, same visual weight as the events panel edge) */}
+                  <div className="pointer-events-none absolute inset-y-0 left-2 w-1.5 rounded-full bg-accent/40 shadow-[0_0_18px_rgba(139,92,246,0.55)] group-hover:bg-accent/80 group-hover:shadow-[0_0_28px_rgba(139,92,246,0.85)] transition-all" />
+                  <div className="pointer-events-none absolute inset-y-0 left-1.5 w-3 rounded-full bg-accent/10 blur-[6px] opacity-80 group-hover:opacity-100 transition-opacity" />
                   <span className="absolute left-5 top-1/2 -translate-y-1/2 -rotate-90 text-[9px] uppercase tracking-[0.35em] text-accent/80 opacity-0 group-hover:opacity-100 transition-opacity select-none lg:hidden">
                     Events
                   </span>
@@ -986,9 +1051,9 @@ export default function App() {
                     <div className="space-y-3 mb-8">
                       <h4 className="text-[8px] uppercase tracking-[0.2em] text-stone-500 font-bold px-1">Our Three Pillars</h4>
                       {[
-                        { name: 'Trenton Premieres', img: 'https://static.wixstatic.com/media/f5611b_e5f5de295192441c943dbac1442d198d~mv2.png/v1/fill/w_1702,h_626,al_c,q_90,enc_avif,quality_auto/f5611b_e5f5de295192441c943dbac1442d198d~mv2.png', link: 'https://www.passagetheatre.org/trenton-premieres' },
-                        { name: 'Trenton Makes', img: 'https://static.wixstatic.com/media/f5611b_8589589e49634a659f9d51ea0c31a5ae~mv2.png/v1/fill/w_1702,h_626,al_c,q_90,enc_avif,quality_auto/f5611b_8589589e49634a659f9d51ea0c31a5ae~mv2.png', link: 'https://www.passagetheatre.org/trenton-makes' },
-                        { name: 'Trenton Presents', img: 'https://static.wixstatic.com/media/f5611b_11ef8f2686814d249aa58cfcc8808039~mv2.png/v1/fill/w_1702,h_626,al_c,q_90,enc_avif,quality_auto/f5611b_11ef8f2686814d249aa58cfcc8808039~mv2.png', link: 'https://www.passagetheatre.org/trenton-presents' }
+                        { name: 'Trenton Premieres', img: 'https://static.wixstatic.com/media/f5611b_e5f5de295192441c943dbac1442d198d~mv2.png/v1/fill/w_1702,h_626,al_c,q_90,enc_avif,quality_auto/f5611b_e5f5de295192441c943dbac1442d198d~mv2.png', link: 'https://www.passagetheatre.org/trentonpremieres' },
+                        { name: 'Trenton Makes', img: 'https://static.wixstatic.com/media/f5611b_8589589e49634a659f9d51ea0c31a5ae~mv2.png/v1/fill/w_1702,h_626,al_c,q_90,enc_avif,quality_auto/f5611b_8589589e49634a659f9d51ea0c31a5ae~mv2.png', link: 'https://www.passagetheatre.org/trentonmakes' },
+                        { name: 'Trenton Presents', img: 'https://static.wixstatic.com/media/f5611b_11ef8f2686814d249aa58cfcc8808039~mv2.png/v1/fill/w_1702,h_626,al_c,q_90,enc_avif,quality_auto/f5611b_11ef8f2686814d249aa58cfcc8808039~mv2.png', link: 'https://www.passagetheatre.org/trentonpresents' }
                       ].map((pillar) => (
                         <div key={pillar.name} className="relative rounded-lg overflow-hidden h-12 border border-white/5 hover:border-accent/30 transition-all cursor-pointer group" onClick={() => window.open(pillar.link, '_blank')}>
                           <img src={pillar.img} alt={pillar.name} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
@@ -1003,10 +1068,10 @@ export default function App() {
                     {UPCOMING_SHOWS.map((file) => (
                       <div 
                         key={file.id} 
-                        className="group cursor-pointer" 
+                        className={`group ${file.link ? 'cursor-pointer' : 'cursor-default'}`} 
                         onClick={() => {
                           if ((file as any).link) {
-                            window.open((file as any).link, '_blank');
+                            window.open((file as any).link, '_blank', 'noopener,noreferrer');
                           } else {
                             setInput(`Tell me more about ${file.name}`);
                           }
@@ -1017,7 +1082,7 @@ export default function App() {
                             src={file.thumbnailLink} 
                             alt={file.name} 
                             referrerPolicy="no-referrer" 
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
+                            className={`w-full h-full object-cover ${file.id === 'gala-2026' ? 'object-top' : ''} group-hover:scale-110 transition-transform duration-700`} 
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
                           <div className="absolute bottom-2 left-2 right-2">
@@ -1171,6 +1236,7 @@ export default function App() {
                     ref={composerRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
+                    disabled={mode === 'internal' && !isAuthenticated}
                     onKeyDown={(e) => {
                       const isEnter = e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter';
                       if (isEnter && !e.shiftKey) {
@@ -1180,8 +1246,12 @@ export default function App() {
                     }}
                     rows={1}
                     enterKeyHint="send"
-                    placeholder={mode === 'public' ? "Whisper your thoughts..." : "Draft a grant or analyze data..."}
-                    className="w-full max-w-full glass bg-white/5 rounded-2xl py-3.5 sm:py-4 pl-4 sm:pl-6 pr-20 sm:pr-32 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all placeholder:text-stone-600 resize-none overflow-y-auto overflow-x-hidden leading-relaxed"
+                    placeholder={
+                      mode === 'public'
+                        ? "Whisper your thoughts..."
+                        : (isAuthenticated ? "Draft a grant or analyze data..." : "Sign in to use Internal mode...")
+                    }
+                    className="w-full max-w-full glass bg-white/5 rounded-2xl py-3.5 sm:py-4 pl-4 sm:pl-6 pr-20 sm:pr-32 text-[16px] sm:text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all placeholder:text-stone-600 disabled:opacity-60 disabled:cursor-not-allowed resize-none overflow-y-auto overflow-x-hidden leading-relaxed"
                   />
                   <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 sm:gap-1">
                     <button
@@ -1250,7 +1320,7 @@ export default function App() {
                 </div>
                 <button
                   type="submit"
-                  disabled={(!input.trim() && !selectedImage) || isLoading}
+                  disabled={((!input.trim() && !selectedImage) || isLoading) || (mode === 'internal' && !isAuthenticated)}
                   className="p-3.5 sm:p-4 rounded-2xl bg-accent text-white hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_15px_rgba(139,92,246,0.3)]"
                 >
                   <Send className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -1266,30 +1336,66 @@ export default function App() {
         <div className="flex flex-col items-center sm:items-start gap-4">
           <span className="text-[10px] uppercase tracking-widest text-stone-500">&copy; 2026 Passage Theatre Company</span>
           <div className="flex flex-wrap items-center gap-4 justify-center sm:justify-start">
-            <img 
-              src="https://static.wixstatic.com/media/f5611b_7510767165fa4d41a3e6f648576b45f4~mv2.png/v1/fill/w_284,h_90,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/PassagelogoresetWHITE(1)(2).png" 
-              alt="Passage Logo" 
-              className="h-8 sm:h-10 opacity-80 hover:opacity-100 transition-opacity"
-              referrerPolicy="no-referrer"
-            />
-            <img 
-              src="https://static.wixstatic.com/media/f5611b_e2e51aa273424cbeaaff2cdf18bb44ac~mv2.png/v1/fill/w_192,h_114,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Trenton%20Premieres.png" 
-              alt="Trenton Premieres" 
-              className="h-7 sm:h-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
-              referrerPolicy="no-referrer"
-            />
-            <img 
-              src="https://static.wixstatic.com/media/f5611b_da92e1d28bf64ee38e9d6418f0c657c3~mv2.png/v1/fill/w_230,h_132,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Trenton%20Makes.png" 
-              alt="Trenton Makes" 
-              className="h-7 sm:h-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
-              referrerPolicy="no-referrer"
-            />
-            <img 
-              src="https://static.wixstatic.com/media/f5611b_04ad1e5a26904b49949ec678966a1034~mv2.png/v1/fill/w_230,h_132,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Trenton%20Presents.png" 
-              alt="Trenton Presents" 
-              className="h-7 sm:h-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
-              referrerPolicy="no-referrer"
-            />
+            <a
+              href="https://www.passagetheatre.org/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open Passage Theatre Company website"
+              title="Passage Theatre Company"
+              className="inline-flex rounded-md focus:outline-none focus:ring-2 focus:ring-accent/60"
+            >
+              <img 
+                src="https://static.wixstatic.com/media/f5611b_7510767165fa4d41a3e6f648576b45f4~mv2.png/v1/fill/w_284,h_90,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/PassagelogoresetWHITE(1)(2).png" 
+                alt="Passage Theatre Company"
+                className="h-8 sm:h-10 opacity-80 hover:opacity-100 transition-opacity"
+                referrerPolicy="no-referrer"
+              />
+            </a>
+            <a
+              href="https://www.passagetheatre.org/trentonpremieres"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open Trenton Premieres"
+              title="Trenton Premieres"
+              className="inline-flex rounded-md focus:outline-none focus:ring-2 focus:ring-accent/60"
+            >
+              <img 
+                src="https://static.wixstatic.com/media/f5611b_e2e51aa273424cbeaaff2cdf18bb44ac~mv2.png/v1/fill/w_192,h_114,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Trenton%20Premieres.png" 
+                alt="Trenton Premieres"
+                className="h-7 sm:h-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
+                referrerPolicy="no-referrer"
+              />
+            </a>
+            <a
+              href="https://www.passagetheatre.org/trentonmakes"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open Trenton Makes"
+              title="Trenton Makes"
+              className="inline-flex rounded-md focus:outline-none focus:ring-2 focus:ring-accent/60"
+            >
+              <img 
+                src="https://static.wixstatic.com/media/f5611b_da92e1d28bf64ee38e9d6418f0c657c3~mv2.png/v1/fill/w_230,h_132,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Trenton%20Makes.png" 
+                alt="Trenton Makes"
+                className="h-7 sm:h-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
+                referrerPolicy="no-referrer"
+              />
+            </a>
+            <a
+              href="https://www.passagetheatre.org/trentonpresents"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open Trenton Presents"
+              title="Trenton Presents"
+              className="inline-flex rounded-md focus:outline-none focus:ring-2 focus:ring-accent/60"
+            >
+              <img 
+                src="https://static.wixstatic.com/media/f5611b_04ad1e5a26904b49949ec678966a1034~mv2.png/v1/fill/w_230,h_132,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Trenton%20Presents.png" 
+                alt="Trenton Presents"
+                className="h-7 sm:h-8 opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
+                referrerPolicy="no-referrer"
+              />
+            </a>
           </div>
         </div>
         <div className="flex gap-6 text-[10px] uppercase tracking-widest text-stone-500">

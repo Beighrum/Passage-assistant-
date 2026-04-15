@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, FormEvent, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus } from 'lucide-react';
 import { generateResponse, generateImage, MessagePart } from './lib/gemini';
-import { auth, db, signInWithGoogle, signInWithDrive } from './lib/firebase';
+import { auth, db, isFirebaseConfigured, signInWithGoogle, signInWithDrive } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDocs, limit } from 'firebase/firestore';
 
@@ -34,7 +34,7 @@ const UPCOMING_SHOWS = [
     id: 'word-on-front', 
     name: 'A Word on Front 250', 
     description: 'Solo Playwriting Contest. Your uniquely Trenton American Story. Submissions Open!',
-    thumbnailLink: 'https://picsum.photos/seed/passage-playwriting/400/225',
+    thumbnailLink: 'https://static.wixstatic.com/media/f5611b_3485f63bd1404ea0aafcfbf96c180a94~mv2.jpg/v1/fill/w_1444,h_936,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f5611b_3485f63bd1404ea0aafcfbf96c180a94~mv2.jpg',
     link: 'https://www.passagetheatre.org/wordonfront',
     mimeType: 'image/jpeg'
   },
@@ -87,11 +87,13 @@ export default function App() {
   const INTERNAL_FOLDER_IDS = ['1l3KRkEaOKsVJLizriswqHn-whyc93aUk', '1j07-wxP7u9r9Y-V4ootX4KN3XB3YY0X4'];
 
   useEffect(() => {
+    if (!auth) return;
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       if (user) {
         // Sync user to Firestore
-        setDoc(doc(db, 'users', user.uid), {
+        if (db) setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
           email: user.email,
           displayName: user.displayName,
@@ -110,6 +112,7 @@ export default function App() {
   }, []);
 
   const fetchSessions = (uid: string) => {
+    if (!db) return () => {};
     const q = query(collection(db, 'users', uid, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
     return onSnapshot(q, (snapshot) => {
       const sessionList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatSession));
@@ -118,7 +121,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (currentUser && currentSessionId) {
+    if (db && currentUser && currentSessionId) {
       const q = query(
         collection(db, 'users', currentUser.uid, 'sessions', currentSessionId, 'messages'),
         orderBy('timestamp', 'asc')
@@ -133,6 +136,10 @@ export default function App() {
 
   const createNewSession = async () => {
     if (!currentUser) {
+      if (!isFirebaseConfigured) {
+        alert("Firebase isn't configured yet (VITE_FIREBASE_*). The app will still work in guest mode, but chat history requires Firebase.");
+        return;
+      }
       try {
         const result = await signInWithGoogle();
         if (!result.user) return;
@@ -150,6 +157,7 @@ export default function App() {
     
     const user = currentUser || auth.currentUser;
     if (!user) return;
+    if (!db) return;
 
     const sessionData = {
       userId: user.uid,
@@ -351,6 +359,10 @@ export default function App() {
   const handleFirebaseLogin = async () => {
     setIsFirebaseLoggingIn(true);
     try {
+      if (!isFirebaseConfigured) {
+        alert("Missing Firebase env vars (VITE_FIREBASE_*). Add them to your .env, restart dev server, then try again.");
+        return;
+      }
       await signInWithGoogle();
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') {
@@ -368,6 +380,10 @@ export default function App() {
     console.log("[OAuth] Starting Firebase-based Drive login...");
     setIsLoggingIn(true);
     try {
+      if (!isFirebaseConfigured) {
+        alert("Missing Firebase env vars (VITE_FIREBASE_*). Add them to your .env, restart dev server, then try again.");
+        return;
+      }
       // Small delay to ensure UI updates
       await new Promise(resolve => setTimeout(resolve, 100));
       
@@ -437,7 +453,7 @@ export default function App() {
     if ((!input.trim() && !selectedImage) || isLoading) return;
 
     let sessionId = currentSessionId;
-    if (!sessionId && currentUser) {
+    if (!sessionId && currentUser && db) {
       // Auto-create session if none exists
       const user = currentUser;
       const sessionData = {
@@ -455,7 +471,7 @@ export default function App() {
     const userMessageContent = input;
     const userMessageImage = selectedImage?.preview;
 
-    if (currentUser && sessionId) {
+    if (db && currentUser && sessionId) {
       await addDoc(collection(db, 'users', currentUser.uid, 'sessions', sessionId, 'messages'), {
         role: 'user',
         content: userMessageContent,
@@ -501,7 +517,7 @@ export default function App() {
               timestamp: serverTimestamp()
             });
             // Update session last message time
-            setDoc(doc(db, 'users', currentUser.uid, 'sessions', sessionId), {
+            if (db) setDoc(doc(db, 'users', currentUser.uid, 'sessions', sessionId), {
               lastMessageAt: serverTimestamp()
             }, { merge: true });
           } else {
@@ -549,7 +565,7 @@ export default function App() {
             timestamp: serverTimestamp()
           });
           // Update session last message time
-          setDoc(doc(db, 'users', currentUser.uid, 'sessions', sessionId), {
+          if (db) setDoc(doc(db, 'users', currentUser.uid, 'sessions', sessionId), {
             lastMessageAt: serverTimestamp()
           }, { merge: true });
         } else {
@@ -707,6 +723,11 @@ export default function App() {
                       >
                         {isFirebaseLoggingIn ? 'Connecting...' : 'Sign In'}
                       </button>
+                      {!isFirebaseConfigured && (
+                        <p className="mt-2 text-[9px] text-stone-600">
+                          Missing <span className="font-mono">VITE_FIREBASE_*</span> env vars.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1049,7 +1070,14 @@ export default function App() {
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-stone-500">
               <span>{mode === 'internal' ? 'Internal Access' : 'Public Access'}</span>
               <span className="text-stone-700">•</span>
-              <span className="text-accent/80 font-bold tracking-[0.2em]">BeighTech</span>
+              <a
+                href="https://beightechai.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent/80 font-bold tracking-[0.2em] hover:underline"
+              >
+                BeighTech
+              </a>
             </div>
             <span className="text-accent/60">Status: {isAuthenticated ? 'Authenticated' : 'Guest'}</span>
           </div>

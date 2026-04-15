@@ -16,23 +16,35 @@ const firebaseConfig = {
 const firestoreDatabaseId =
   import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID?.trim() || '(default)';
 
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+export const isFirebaseConfigured = !!(
+  firebaseConfig.apiKey &&
+  firebaseConfig.authDomain &&
+  firebaseConfig.projectId
+);
+
+if (!isFirebaseConfigured) {
   console.warn(
     '[Firebase] Missing VITE_FIREBASE_* variables. Add them to .env locally or in Vercel → Settings → Environment Variables.'
   );
 }
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app, firestoreDatabaseId);
+const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
+
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app, firestoreDatabaseId) : null;
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('https://www.googleapis.com/auth/drive.readonly');
 googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
 googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');
 
-export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const signInWithGoogle = () => {
+  if (!auth) throw new Error('Firebase is not configured');
+  return signInWithPopup(auth, googleProvider);
+};
 
 export const signInWithDrive = async () => {
+  if (!auth) throw new Error('Firebase is not configured');
   console.log('[Firebase] Initiating signInWithPopup for Drive...');
   const result = await signInWithPopup(auth, googleProvider);
   console.log('[Firebase] signInWithPopup result received.');

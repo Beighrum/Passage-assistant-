@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, FormEvent, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus } from 'lucide-react';
+import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus, Trash2, SlidersHorizontal, Home } from 'lucide-react';
 import { generateResponse, generateImage, MessagePart } from './lib/gemini';
 import {
   auth,
@@ -13,7 +13,7 @@ import {
   signInWithGoogleRedirect,
 } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDocs, limit } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDocs, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 
 interface Message {
   id: string;
@@ -85,6 +85,7 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerFormRef = useRef<HTMLFormElement | null>(null);
 
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -93,6 +94,7 @@ export default function App() {
   const [imageSize, setImageSize] = useState<"1K" | "2K" | "4K">("1K");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const [isImageSizeOpen, setIsImageSizeOpen] = useState(false);
 
   const PUBLIC_FOLDER_ID = '1SGoxWRv2WE_SKy4MwJhCl3A6nSy2KGwS';
   const INTERNAL_FOLDER_IDS = ['1l3KRkEaOKsVJLizriswqHn-whyc93aUk', '1j07-wxP7u9r9Y-V4ootX4KN3XB3YY0X4'];
@@ -411,6 +413,38 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isFirebaseLoggingIn, setIsFirebaseLoggingIn] = useState(false);
 
+  const exitChat = () => {
+    setSelectedImage(null);
+    setSelectedDriveFile(null);
+    setInput('');
+    setMessages([]);
+    setCurrentSessionId(null);
+    setIsSidebarOpen(false);
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    if (!db || !currentUser) return;
+    const ok = window.confirm('Delete this chat? This cannot be undone.');
+    if (!ok) return;
+
+    // Delete subcollection messages in batches, then delete session doc.
+    const msgsCol = collection(db, 'users', currentUser.uid, 'sessions', sessionId, 'messages');
+    // Loop until empty (handles > batch limit).
+    while (true) {
+      const snap = await getDocs(query(msgsCol, limit(400)));
+      if (snap.empty) break;
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+    await deleteDoc(doc(db, 'users', currentUser.uid, 'sessions', sessionId));
+
+    if (currentSessionId === sessionId) {
+      setCurrentSessionId(null);
+      setMessages([]);
+    }
+  };
+
   const handleFirebaseLogin = async () => {
     setIsFirebaseLoggingIn(true);
     try {
@@ -661,7 +695,19 @@ export default function App() {
     } catch (error) {
       console.error("Failed to get AI response:", error);
       const errorContent = "The ethereal connection was interrupted. Please try again.";
-      if (!currentUser) {
+      // Always surface an error message (guests + authed users). For authed users, persist to Firestore when possible.
+      try {
+        if (db && currentUser && (currentSessionId || sessionId)) {
+          const sid = (sessionId || currentSessionId) as string;
+          await addDoc(collection(db, 'users', currentUser.uid, 'sessions', sid, 'messages'), {
+            role: 'model',
+            content: errorContent,
+            timestamp: serverTimestamp(),
+          });
+        } else {
+          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: errorContent, timestamp: new Date() }]);
+        }
+      } catch (e) {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: errorContent, timestamp: new Date() }]);
       }
     } finally {
@@ -717,6 +763,17 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={exitChat}
+              className="p-2 hover:bg-white/10 rounded-xl text-stone-400"
+              title="Exit chat"
+              aria-label="Exit chat"
+            >
+              <Home className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={resetConversation}
@@ -789,22 +846,38 @@ export default function App() {
 
                 <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-hide">
                   {sessions.map(session => (
-                    <button
+                    <div
                       key={session.id}
-                      onClick={() => {
-                        setCurrentSessionId(session.id);
-                        setMode(session.mode);
-                        setIsSidebarOpen(false);
-                      }}
-                      className={`w-full flex flex-col gap-1 p-3 rounded-xl text-left transition-all ${
+                      className={`w-full rounded-xl transition-all ${
                         currentSessionId === session.id ? 'bg-accent/20 border border-accent/30' : 'hover:bg-white/5'
                       }`}
                     >
-                      <span className={`text-[9px] uppercase tracking-widest ${session.mode === 'internal' ? 'text-accent' : 'text-stone-500'}`}>
-                        {session.mode}
-                      </span>
-                      <span className="text-xs text-white truncate font-medium">{session.title}</span>
-                    </button>
+                      <div className="flex items-start gap-2 p-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentSessionId(session.id);
+                            setMode(session.mode);
+                            setIsSidebarOpen(false);
+                          }}
+                          className="flex-1 text-left"
+                        >
+                          <span className={`text-[9px] uppercase tracking-widest ${session.mode === 'internal' ? 'text-accent' : 'text-stone-500'}`}>
+                            {session.mode}
+                          </span>
+                          <div className="text-xs text-white truncate font-medium">{session.title}</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteSession(session.id)}
+                          className="p-1.5 rounded-lg text-stone-500 hover:text-red-300 hover:bg-white/5"
+                          title="Delete chat"
+                          aria-label="Delete chat"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   ))}
                   {sessions.length === 0 && !currentUser && (
                     <div className="text-center py-8 px-4">
@@ -1079,26 +1152,7 @@ export default function App() {
             )}
 
             {/* Input Area */}
-            <div className="mt-4 sm:mt-6 relative w-full max-w-3xl px-2 sm:px-0 pb-2 sm:pb-0">
-              {/* Image Size Selection Affordance - Internal Only */}
-              {mode === 'internal' && (
-                <div className="absolute bottom-full mb-3 right-0 flex items-center gap-2 p-1.5 glass rounded-xl">
-                  <span className="text-[8px] uppercase tracking-widest text-stone-500 px-1">Image Size:</span>
-                  {(["1K", "2K", "4K"] as const).map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => setImageSize(size)}
-                      className={`px-2 py-0.5 rounded-md text-[9px] font-medium transition-all ${
-                        imageSize === size ? 'bg-accent text-white' : 'text-stone-500 hover:text-stone-300'
-                      }`}
-                    >
-                      {size}
-                    </button>
-                  ))}
-                </div>
-              )}
-
+            <div className="mt-3 sm:mt-6 relative w-full max-w-3xl px-2 sm:px-0 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-0">
               {selectedImage && (
                 <div className="absolute bottom-full mb-3 left-0 flex items-center gap-2 p-2 glass rounded-xl">
                   <img src={selectedImage.preview} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
@@ -1109,6 +1163,7 @@ export default function App() {
               )}
               <form 
                 onSubmit={handleSubmit}
+                ref={composerFormRef}
                 className="relative flex items-center gap-2"
               >
                 <div className="relative flex-1">
@@ -1117,12 +1172,14 @@ export default function App() {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      const isEnter = e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter';
+                      if (isEnter && !e.shiftKey) {
                         e.preventDefault();
-                        handleSubmit();
+                        if (!isLoading) composerFormRef.current?.requestSubmit();
                       }
                     }}
                     rows={1}
+                    enterKeyHint="send"
                     placeholder={mode === 'public' ? "Whisper your thoughts..." : "Draft a grant or analyze data..."}
                     className="w-full max-w-full glass bg-white/5 rounded-2xl py-3.5 sm:py-4 pl-4 sm:pl-6 pr-20 sm:pr-32 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all placeholder:text-stone-600 resize-none overflow-y-auto overflow-x-hidden leading-relaxed"
                   />
@@ -1135,6 +1192,41 @@ export default function App() {
                     >
                       {isListening ? <MicOff className="w-3.5 h-3.5 sm:w-5 sm:h-5" /> : <Mic className="w-3.5 h-3.5 sm:w-5 sm:h-5" />}
                     </button>
+                    {mode === 'internal' && (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setIsImageSizeOpen(v => !v)}
+                          className="p-1.5 sm:p-2 rounded-xl text-stone-500 hover:text-white hover:bg-white/5 transition-all"
+                          title={`Image size: ${imageSize}`}
+                          aria-label="Select image size"
+                        >
+                          <SlidersHorizontal className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
+                        </button>
+                        {isImageSizeOpen && (
+                          <div className="absolute right-0 bottom-full mb-2 glass rounded-xl p-1 border border-white/10 shadow-xl min-w-[140px]">
+                            <div className="px-2 py-1 text-[8px] uppercase tracking-widest text-stone-500">Image size</div>
+                            <div className="flex gap-1 p-1">
+                              {(["1K", "2K", "4K"] as const).map((size) => (
+                                <button
+                                  key={size}
+                                  type="button"
+                                  onClick={() => {
+                                    setImageSize(size);
+                                    setIsImageSizeOpen(false);
+                                  }}
+                                  className={`flex-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                                    imageSize === size ? 'bg-accent text-white' : 'text-stone-400 hover:bg-white/5 hover:text-white'
+                                  }`}
+                                >
+                                  {size}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {mode === 'internal' && (
                       <>
                         <button
@@ -1170,7 +1262,7 @@ export default function App() {
       </main>
 
       {/* Footer Decoration */}
-      <footer className="relative z-10 px-8 py-6 flex flex-col sm:flex-row justify-between items-center gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0">
+      <footer className="hidden sm:flex relative z-10 px-8 py-6 flex-col sm:flex-row justify-between items-center gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0">
         <div className="flex flex-col items-center sm:items-start gap-4">
           <span className="text-[10px] uppercase tracking-widest text-stone-500">&copy; 2026 Passage Theatre Company</span>
           <div className="flex flex-wrap items-center gap-4 justify-center sm:justify-start">

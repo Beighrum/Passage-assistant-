@@ -1,0 +1,48 @@
+@import "tailwindcss";
+/* Google Fonts are loaded in index.html so @import order stays valid after Tailwind expands. */
+
+@theme {
+  --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", serif;
+  
+  --color-accent: #8b5cf6;
+  --color-glass-surface: rgba(139, 92, 246, 0.08);
+  --color-glass-border: rgba(196, 181, 253, 0.1);
+  --color-passage-purple: #a78bfa;
+}
+
+@layer base {
+  body {
+    @apply bg-[#05020a] text-stone-200 antialiased selection:bg-accent/30;
+    font-family: var(--font-sans);
+  }
+}
+
+.highlight-purple {
+  @apply text-passage-purple font-semibold hover:underline cursor-pointer;
+}
+
+.atmosphere {
+  background: 
+    radial-gradient(circle at 50% 30%, #1e1b4b 0%, transparent 60%),
+    radial-gradient(circle at 10% 80%, var(--color-accent) 0%, transparent 50%);
+  filter: blur(80px);
+  opacity: 0.6;
+}
+
+.glass {
+  @apply bg-glass-surface backdrop-blur-3xl border border-glass-border;
+}
+
+.serif {
+  font-family: var(--font-serif);
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}

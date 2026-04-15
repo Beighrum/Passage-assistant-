@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{userId}
+    // Fields: uid, email, displayName, photoURL, createdAt
+    //
+    // Collection: /users/{userId}/sessions/{sessionId}
+    // Fields: userId, mode, title, lastMessageAt, createdAt
+    //
+    // Collection: /users/{userId}/sessions/{sessionId}/messages/{messageId}
+    // Fields: sessionId, role, content, image, timestamp
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.uid is string && data.email is string;
+    }
+
+    function isValidSession(data) {
+      return data.userId == request.auth.uid && data.mode in ['public', 'internal'];
+    }
+
+    function isValidMessage(data) {
+      return data.role in ['user', 'model'] && data.content is string && data.content.size() < 10000;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+      
+      match /sessions/{sessionId} {
+        allow read, write: if isOwner(userId) && (request.method != 'create' || isValidSession(request.resource.data));
+        
+        match /messages/{messageId} {
+          allow read, write: if isOwner(userId) && (request.method != 'create' || isValidMessage(request.resource.data));
+        }
+      }
+    }
+  }
+}

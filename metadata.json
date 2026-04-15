@@ -1,0 +1,6 @@
+{
+  "name": "Passage Theatre Assistant",
+  "description": "Unified AI assistant for Passage Theatre audiences and staff, featuring persistent chat memory, voice interaction, and Google Drive integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["Google OAuth", "Google Drive API", "Multimodal AI", "Dual-Mode Interface"]
+}

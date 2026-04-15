@@ -1,5 +1,11 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 /** Client Firebase config from env (Vercel + local .env). Do not commit secrets; set in Vercel Project → Environment Variables. */
@@ -43,11 +49,33 @@ export const signInWithGoogle = () => {
   return signInWithPopup(auth, googleProvider);
 };
 
+export const signInWithGoogleRedirect = () => {
+  if (!auth) throw new Error('Firebase is not configured');
+  return signInWithRedirect(auth, googleProvider);
+};
+
 export const signInWithDrive = async () => {
   if (!auth) throw new Error('Firebase is not configured');
   console.log('[Firebase] Initiating signInWithPopup for Drive...');
   const result = await signInWithPopup(auth, googleProvider);
   console.log('[Firebase] signInWithPopup result received.');
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  return {
+    user: result.user,
+    accessToken: credential?.accessToken,
+  };
+};
+
+export const signInWithDriveRedirect = () => {
+  if (!auth) throw new Error('Firebase is not configured');
+  console.log('[Firebase] Initiating signInWithRedirect for Drive...');
+  return signInWithRedirect(auth, googleProvider);
+};
+
+export const getRedirectAuthResult = async () => {
+  if (!auth) return null;
+  const result = await getRedirectResult(auth).catch(() => null);
+  if (!result) return null;
   const credential = GoogleAuthProvider.credentialFromResult(result);
   return {
     user: result.user,

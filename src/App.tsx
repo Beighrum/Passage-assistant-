@@ -2,7 +2,16 @@ import { useState, useRef, useEffect, FormEvent, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus } from 'lucide-react';
 import { generateResponse, generateImage, MessagePart } from './lib/gemini';
-import { auth, db, isFirebaseConfigured, signInWithGoogle, signInWithDrive } from './lib/firebase';
+import {
+  auth,
+  db,
+  getRedirectAuthResult,
+  isFirebaseConfigured,
+  signInWithDrive,
+  signInWithDriveRedirect,
+  signInWithGoogle,
+  signInWithGoogleRedirect,
+} from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDocs, limit } from 'firebase/firestore';
 
@@ -322,6 +331,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Complete Firebase redirect sign-in (mobile-friendly).
+    (async () => {
+      try {
+        const r = await getRedirectAuthResult();
+        if (!r?.user) return;
+        setCurrentUser(r.user);
+
+        // If redirect granted Drive access, establish server session too.
+        if (r.accessToken) {
+          const res = await fetch('/api/auth/firebase-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken: r.accessToken }),
+          });
+          if (res.ok) {
+            setIsAuthenticated(true);
+            fetchAllFolders();
+          }
+        }
+      } catch (e) {
+        console.error('[Firebase] Redirect completion failed', e);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
     if (isAuthenticated) {
       fetchAllFolders();
     }
@@ -373,6 +408,11 @@ export default function App() {
         alert("Missing Firebase env vars (VITE_FIREBASE_*). Add them to your .env, restart dev server, then try again.");
         return;
       }
+      const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithGoogleRedirect();
+        return;
+      }
       await signInWithGoogle();
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') {
@@ -392,6 +432,12 @@ export default function App() {
     try {
       if (!isFirebaseConfigured) {
         alert("Missing Firebase env vars (VITE_FIREBASE_*). Add them to your .env, restart dev server, then try again.");
+        return;
+      }
+
+      const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithDriveRedirect();
         return;
       }
       // Small delay to ensure UI updates
@@ -435,6 +481,16 @@ export default function App() {
       }
     } finally {
       setIsLoggingIn(false);
+    }
+  };
+
+  const resetConversation = () => {
+    setSelectedImage(null);
+    setSelectedDriveFile(null);
+    setInput('');
+    setMessages([]);
+    if (mode === 'internal') {
+      setCurrentSessionId(null);
     }
   };
 
@@ -649,6 +705,15 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
+          <button
+            type="button"
+            onClick={resetConversation}
+            className="p-2 hover:bg-white/10 rounded-xl text-stone-400"
+            title="New chat"
+            aria-label="New chat"
+          >
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-2 hover:bg-white/10 rounded-xl text-stone-400"

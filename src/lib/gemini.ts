@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "@google/genai/web";
 
 const apiKey = process.env.GEMINI_API_KEY;
 

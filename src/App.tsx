@@ -388,7 +388,8 @@ export default function App() {
   const checkAuthStatus = async () => {
     try {
       const res = await fetch('/api/auth/status');
-      const data = await res.json();
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { isAuthenticated: false };
       setIsAuthenticated(data.isAuthenticated);
     } catch (e) {
       console.error("Auth status check failed", e);
@@ -469,8 +470,10 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Failed to establish server session");
+        const msg = await res.text().catch(() => '');
+        let parsed: any = null;
+        try { parsed = msg ? JSON.parse(msg) : null; } catch {}
+        throw new Error(parsed?.error || msg || "Failed to establish server session");
       }
 
       console.log("[OAuth] Login successful!");
@@ -667,12 +670,12 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-[100dvh] overflow-hidden flex flex-col">
+    <div className="relative h-[100dvh] w-screen overflow-hidden flex flex-col min-h-0">
       {/* Background Atmosphere */}
       <div className="fixed inset-0 z-0 atmosphere pointer-events-none" />
       
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-white/5 backdrop-blur-md">
+      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-white/5 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-2 sm:gap-3">
           <button
             type="button"
@@ -757,8 +760,8 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex-1 flex flex-col max-w-6xl mx-auto w-full px-2 sm:px-4 py-4 sm:py-8 overflow-hidden">
-        <div className="flex-1 flex gap-4 sm:gap-6 overflow-hidden relative">
+      <main className="relative z-10 flex-1 min-h-0 flex flex-col max-w-6xl mx-auto w-full px-2 sm:px-4 py-4 sm:py-8 overflow-hidden">
+        <div className="flex-1 min-h-0 flex gap-4 sm:gap-6 overflow-hidden relative">
           
           {/* Sidebar for Chat History (Mobile Overlay / Desktop Sidebar for Internal) */}
           <AnimatePresence>
@@ -850,13 +853,20 @@ export default function App() {
             {mode === 'public' && messages.length === 0 && (
               <>
                 {/* Hover/Click Trigger Area */}
-                <div 
-                  className="fixed left-0 top-24 bottom-24 w-8 z-40 cursor-pointer group"
+                <button
+                  type="button"
+                  className="fixed left-0 top-20 bottom-20 w-12 z-40 cursor-pointer group focus:outline-none"
                   onMouseEnter={() => setIsEventsOpen(true)}
                   onClick={() => setIsEventsPinnedOpen(v => !v)}
+                  aria-label="Open Upcoming Events"
+                  title="Upcoming Events"
                 >
-                  <div className="h-full w-1 bg-accent/20 group-hover:bg-accent/50 transition-colors rounded-full ml-2" />
-                </div>
+                  <div className="absolute left-2 top-1/2 -translate-y-1/2 h-28 w-1.5 rounded-full bg-accent/40 shadow-[0_0_18px_rgba(139,92,246,0.55)] group-hover:bg-accent/80 group-hover:shadow-[0_0_28px_rgba(139,92,246,0.85)] transition-all" />
+                  <div className="absolute left-1.5 top-1/2 -translate-y-1/2 h-28 w-3 rounded-full bg-accent/10 blur-[6px] opacity-80 group-hover:opacity-100 transition-opacity" />
+                  <span className="absolute left-5 top-1/2 -translate-y-1/2 -rotate-90 text-[9px] uppercase tracking-[0.35em] text-accent/80 opacity-0 group-hover:opacity-100 transition-opacity select-none lg:hidden">
+                    Events
+                  </span>
+                </button>
 
                 {/* Mobile backdrop to close */}
                 {(isEventsPinnedOpen || isEventsOpen) && (
@@ -960,9 +970,10 @@ export default function App() {
           </AnimatePresence>
 
           {/* Chat Area */}
-          <div className="flex-1 flex flex-col overflow-hidden items-center h-full">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden items-center h-full min-w-0">
             {messages.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 sm:space-y-8 px-4 max-w-3xl w-full">
+              <div className="flex-1 min-h-0 w-full max-w-3xl overflow-y-auto overflow-x-hidden px-4 scrollbar-hide">
+                <div className="min-h-full flex flex-col items-center justify-center text-center space-y-6 sm:space-y-8 py-8">
                 <motion.div 
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -1001,11 +1012,12 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                </div>
               </div>
             ) : (
-              <div 
+              <div
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto space-y-6 sm:space-y-8 pr-2 sm:pr-4 scrollbar-hide"
+                className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-6 sm:space-y-8 pr-2 sm:pr-4 scrollbar-hide"
               >
                 <AnimatePresence initial={false}>
                   {messages.map((message) => (
@@ -1112,7 +1124,7 @@ export default function App() {
                     }}
                     rows={1}
                     placeholder={mode === 'public' ? "Whisper your thoughts..." : "Draft a grant or analyze data..."}
-                    className="w-full glass bg-white/5 rounded-2xl py-3.5 sm:py-4 pl-4 sm:pl-6 pr-20 sm:pr-32 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all placeholder:text-stone-600 resize-none overflow-y-auto leading-relaxed"
+                    className="w-full max-w-full glass bg-white/5 rounded-2xl py-3.5 sm:py-4 pl-4 sm:pl-6 pr-20 sm:pr-32 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all placeholder:text-stone-600 resize-none overflow-y-auto overflow-x-hidden leading-relaxed"
                   />
                   <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 sm:gap-1">
                     <button
@@ -1158,7 +1170,7 @@ export default function App() {
       </main>
 
       {/* Footer Decoration */}
-      <footer className="relative z-10 px-8 py-6 flex flex-col sm:flex-row justify-between items-center gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm">
+      <footer className="relative z-10 px-8 py-6 flex flex-col sm:flex-row justify-between items-center gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0">
         <div className="flex flex-col items-center sm:items-start gap-4">
           <span className="text-[10px] uppercase tracking-widest text-stone-500">&copy; 2026 Passage Theatre Company</span>
           <div className="flex flex-wrap items-center gap-4 justify-center sm:justify-start">

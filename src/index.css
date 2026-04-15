@@ -16,6 +16,8 @@
   body {
     height: 100%;
     overflow: hidden;
+    overflow-x: hidden;
+    overscroll-behavior: none;
   }
   body {
     @apply bg-[#05020a] text-stone-200 antialiased selection:bg-accent/30;

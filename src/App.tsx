@@ -457,6 +457,12 @@ export default function App() {
     }
   };
 
+  /** Full sign-out (Firebase + Drive cookie) then reload — fixes Reset not logging out. */
+  const handleResetAndReload = async () => {
+    await handleSignOut();
+    window.location.reload();
+  };
+
   const deleteSession = async (sessionId: string) => {
     if (!db || !currentUser) return;
     const ok = window.confirm('Delete this chat? This cannot be undone.');
@@ -621,8 +627,8 @@ export default function App() {
 
   const handleSubmit = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (mode === 'internal' && !isAuthenticated) {
-      alert('Internal mode requires sign-in. Please log in, then try again.');
+    if (mode === 'internal' && !currentUser) {
+      alert('Internal mode requires a Google account. Use Login, then try again.');
       return;
     }
     if ((!input.trim() && !selectedImage) || isLoading) return;
@@ -802,7 +808,7 @@ export default function App() {
       <div className="fixed inset-0 z-0 atmosphere pointer-events-none" />
       
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-white/5 backdrop-blur-md shrink-0">
+      <header className="relative z-[100] flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-white/5 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-2 sm:gap-3">
           <button
             type="button"
@@ -891,28 +897,34 @@ export default function App() {
               <span className="hidden sm:inline text-[10px] uppercase tracking-widest">History</span>
             </button>
           )}
-          {mode === 'internal' && !isAuthenticated && (
+          {mode === 'internal' && (!currentUser || !isAuthenticated) && (
             <div className="flex items-center gap-2">
-              <button 
+              <button
+                type="button"
                 onClick={handleGoogleLogin}
                 disabled={isLoggingIn}
                 className="flex items-center gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 bg-white/10 hover:bg-white/20 rounded-xl text-[9px] sm:text-xs transition-all disabled:opacity-50"
               >
                 {isLoggingIn ? <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 animate-spin" /> : <LogIn className="w-3 h-3 sm:w-4 sm:h-4" />}
-                <span className="hidden sm:inline">{isLoggingIn ? 'Connecting...' : 'Login'}</span>
+                <span className="hidden sm:inline">
+                  {isLoggingIn
+                    ? 'Connecting...'
+                    : currentUser
+                      ? 'Connect Drive'
+                      : 'Login'}
+                </span>
               </button>
               <button
-                onClick={async () => {
-                  await fetch('/api/auth/logout', { credentials: 'include' });
-                  window.location.reload();
-                }}
+                type="button"
+                onClick={() => void handleResetAndReload()}
                 className="p-2 hover:bg-white/10 rounded-xl text-stone-500 text-[8px] uppercase tracking-widest"
+                title="Sign out and reload"
               >
                 Reset
               </button>
             </div>
           )}
-          <div className="relative">
+          <div className="relative z-[110]">
             <button
               type="button"
               onClick={() => setIsAccountMenuOpen(v => !v)}
@@ -927,11 +939,11 @@ export default function App() {
               <>
                 <button
                   type="button"
-                  className="fixed inset-0 z-40 cursor-default"
+                  className="fixed inset-0 z-[110] cursor-default"
                   aria-label="Close account menu"
                   onClick={() => setIsAccountMenuOpen(false)}
                 />
-                <div className="absolute right-0 mt-2 z-50 min-w-44 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+                <div className="absolute right-0 mt-2 z-[120] min-w-44 glass rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
                   <div className="px-3 py-2 border-b border-white/5">
                     <div className="text-[10px] uppercase tracking-widest text-stone-500">Signed in</div>
                     <div className="text-xs text-white truncate">{currentUser.email || currentUser.displayName || 'Google account'}</div>
@@ -964,7 +976,7 @@ export default function App() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:bg-black/40"
+                  className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm lg:bg-black/40"
                   onClick={() => setIsSidebarOpen(false)}
                 />
               <motion.div
@@ -972,7 +984,7 @@ export default function App() {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                className="fixed inset-y-0 left-0 z-50 flex w-[min(18rem,92vw)] flex-col gap-4 overflow-hidden bg-[#05020a] p-6 glass rounded-r-3xl"
+                className="fixed inset-y-0 left-0 z-[80] flex w-[min(18rem,92vw)] flex-col gap-4 overflow-hidden bg-[#05020a] p-6 glass rounded-r-3xl"
               >
                 <div className="flex items-center justify-between px-2">
                   <h3 className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-semibold">History</h3>
@@ -1319,7 +1331,7 @@ export default function App() {
                     ref={composerRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    disabled={mode === 'internal' && !isAuthenticated}
+                    disabled={mode === 'internal' && !currentUser}
                     onKeyDown={(e) => {
                       const isEnter = e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter';
                       if (isEnter && !e.shiftKey) {
@@ -1332,7 +1344,11 @@ export default function App() {
                     placeholder={
                       mode === 'public'
                         ? "Whisper your thoughts..."
-                        : (isAuthenticated ? "Draft a grant or analyze data..." : "Sign in to use Internal mode...")
+                        : !currentUser
+                          ? "Sign in (Google) to use Internal mode..."
+                          : !isAuthenticated
+                            ? "Draft a grant… (Connect Drive to attach files from Drive)"
+                            : "Draft a grant or analyze data..."
                     }
                     className="w-full max-w-full glass bg-white/5 rounded-2xl py-3.5 sm:py-4 pl-4 sm:pl-6 pr-20 sm:pr-32 text-[16px] sm:text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all placeholder:text-stone-600 disabled:opacity-60 disabled:cursor-not-allowed resize-none overflow-y-auto overflow-x-hidden leading-relaxed"
                   />
@@ -1403,7 +1419,7 @@ export default function App() {
                 </div>
                 <button
                   type="submit"
-                  disabled={((!input.trim() && !selectedImage) || isLoading) || (mode === 'internal' && !isAuthenticated)}
+                  disabled={((!input.trim() && !selectedImage) || isLoading) || (mode === 'internal' && !currentUser)}
                   className="p-3.5 sm:p-4 rounded-2xl bg-accent text-white hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_15px_rgba(139,92,246,0.3)]"
                 >
                   <Send className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -1415,7 +1431,7 @@ export default function App() {
       </main>
 
       {/* Footer Decoration */}
-      <footer className="relative z-10 px-4 sm:px-8 py-3 sm:py-6 flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-6">
+      <footer className="relative z-[100] px-4 sm:px-8 py-3 sm:py-6 flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-6">
         <div className="flex flex-col items-center sm:items-start gap-4">
           <span className="text-[10px] uppercase tracking-widest text-stone-500">&copy; 2026 Passage Theatre Company</span>
           <div className="flex flex-wrap items-center gap-4 justify-center sm:justify-start">

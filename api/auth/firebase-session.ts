@@ -3,9 +3,15 @@ import { buildSetTokenCookie } from '../_lib/cookies';
 /** Keep cookie value under typical 4KB header limits */
 const MAX_TOKEN_CHARS = 3500;
 
-function readJsonBody(req: any): Record<string, unknown> {
+async function readJsonBody(req: any): Promise<Record<string, unknown>> {
   const b = req?.body;
-  if (b == null) return {};
+  if (Buffer.isBuffer(b)) {
+    try {
+      return JSON.parse(b.toString('utf8')) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
   if (typeof b === 'string') {
     try {
       return JSON.parse(b) as Record<string, unknown>;
@@ -13,8 +19,17 @@ function readJsonBody(req: any): Record<string, unknown> {
       return {};
     }
   }
-  if (typeof b === 'object') return b as Record<string, unknown>;
-  return {};
+  if (b != null && typeof b === 'object') {
+    return b as Record<string, unknown>;
+  }
+  try {
+    const { text } = await import('node:stream/consumers');
+    const raw = await text(req);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -26,7 +41,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const body = readJsonBody(req);
+    const body = await readJsonBody(req);
     const accessToken = String(body?.accessToken || '').trim();
     if (!accessToken) {
       res.statusCode = 400;

@@ -1,4 +1,4 @@
-import { buildClearTokenCookie } from '../_lib/cookies';
+import { buildClearTokenCookie } from '../lib/cookies';
 
 export default async function handler(req: any, res: any) {
   res.statusCode = 200;

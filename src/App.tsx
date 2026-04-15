@@ -334,9 +334,7 @@ export default function App() {
     checkAuthStatus();
     fetchDriveFiles(PUBLIC_FOLDER_ID, setPublicFiles);
     const handleMessage = (event: MessageEvent) => {
-      console.log("[OAuth] Received message from popup:", event.data);
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        console.log("[OAuth] Auth success message confirmed. Updating state.");
         setIsAuthenticated(true);
         fetchAllFolders();
       }
@@ -359,6 +357,7 @@ export default function App() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ accessToken: r.accessToken }),
+            credentials: 'include',
           });
           if (res.ok) {
             setIsAuthenticated(true);
@@ -403,10 +402,14 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/status', { credentials: 'include' });
       const text = await res.text();
-      const data = text ? JSON.parse(text) : { isAuthenticated: false };
-      setIsAuthenticated(data.isAuthenticated);
-    } catch (e) {
-      console.error("Auth status check failed", e);
+      if (!res.ok || !text.trim().startsWith('{')) {
+        setIsAuthenticated(false);
+        return;
+      }
+      const data = JSON.parse(text) as { isAuthenticated?: boolean };
+      setIsAuthenticated(!!data.isAuthenticated);
+    } catch {
+      setIsAuthenticated(false);
     }
   };
 
@@ -415,11 +418,16 @@ export default function App() {
       const res = await fetch(`/api/drive/files?folderId=${folderId}`, {
         credentials: 'include',
       });
-      const data = await res.json();
+      const text = await res.text();
+      if (!res.ok || !text.trim().startsWith('{')) {
+        if (setter) setter([]);
+        return [];
+      }
+      const data = JSON.parse(text) as { files?: any[] };
       if (setter) setter(data.files || []);
       return data.files || [];
-    } catch (e) {
-      console.error(`Failed to fetch drive files for ${folderId}`, e);
+    } catch {
+      if (setter) setter([]);
       return [];
     }
   };

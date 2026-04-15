@@ -1,5 +1,13 @@
 const COOKIE_NAME = 'pt_drive_token';
 
+/** Vercel/Node may pass `cookie` as string or string[] in edge cases. */
+export function getCookieHeaderFromReq(req: { headers?: { cookie?: string | string[] } } | null) {
+  const c = req?.headers?.cookie;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.join('; ');
+  return undefined;
+}
+
 export function getTokenFromCookieHeader(cookieHeader: string | undefined | null) {
   if (!cookieHeader) return null;
   const parts = cookieHeader.split(';').map((p) => p.trim());

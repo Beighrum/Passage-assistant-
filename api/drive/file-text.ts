@@ -1,5 +1,5 @@
-import { getTokenFromCookieHeader } from '../_lib/cookies';
-import { extractDriveFileText } from '../_lib/driveText';
+import { getCookieHeaderFromReq, getTokenFromCookieHeader } from '../lib/cookies';
+import { extractDriveFileText } from '../lib/driveText';
 
 export const config = {
   maxDuration: 60,
@@ -14,7 +14,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const token = getTokenFromCookieHeader(req.headers?.cookie);
+    const token = getTokenFromCookieHeader(getCookieHeaderFromReq(req));
     if (!token) {
       res.statusCode = 401;
       res.setHeader('Content-Type', 'application/json');

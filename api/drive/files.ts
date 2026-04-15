@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { getTokenFromCookieHeader } from '../_lib/cookies';
+import { getCookieHeaderFromReq, getTokenFromCookieHeader } from '../lib/cookies';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {
@@ -9,7 +9,7 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const token = getTokenFromCookieHeader(req.headers?.cookie);
+  const token = getTokenFromCookieHeader(getCookieHeaderFromReq(req));
   if (!token) {
     res.statusCode = 401;
     res.setHeader('Content-Type', 'application/json');

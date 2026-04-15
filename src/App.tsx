@@ -30,6 +30,9 @@ interface ChatSession {
   createdAt: any;
 }
 
+/** After internal login, stay on Internal across refresh (Firebase + optional Drive cookie). */
+const PASSAGE_PREFER_INTERNAL = 'passage_prefer_internal';
+
 const UPCOMING_SHOWS = [
   { 
     id: 'gala-2026', 
@@ -106,6 +109,12 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       if (user) {
+        setMode('internal');
+        try {
+          localStorage.setItem(PASSAGE_PREFER_INTERNAL, '1');
+        } catch {
+          /* ignore */
+        }
         // Sync user to Firestore
         if (db) setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
@@ -392,7 +401,7 @@ export default function App() {
 
   const checkAuthStatus = async () => {
     try {
-      const res = await fetch('/api/auth/status');
+      const res = await fetch('/api/auth/status', { credentials: 'include' });
       const text = await res.text();
       const data = text ? JSON.parse(text) : { isAuthenticated: false };
       setIsAuthenticated(data.isAuthenticated);
@@ -403,7 +412,9 @@ export default function App() {
 
   const fetchDriveFiles = async (folderId: string, setter?: (files: any[]) => void) => {
     try {
-      const res = await fetch(`/api/drive/files?folderId=${folderId}`);
+      const res = await fetch(`/api/drive/files?folderId=${folderId}`, {
+        credentials: 'include',
+      });
       const data = await res.json();
       if (setter) setter(data.files || []);
       return data.files || [];
@@ -428,7 +439,7 @@ export default function App() {
   const handleSignOut = async () => {
     try {
       // Clear server-side Drive session (if any)
-      await fetch('/api/auth/logout').catch(() => {});
+      await fetch('/api/auth/logout', { credentials: 'include' }).catch(() => {});
       // Clear Firebase auth
       if (auth) await signOut(auth);
     } finally {
@@ -438,6 +449,11 @@ export default function App() {
       setSessions([]);
       exitChat();
       setMode('public');
+      try {
+        localStorage.removeItem(PASSAGE_PREFER_INTERNAL);
+      } catch {
+        /* ignore */
+      }
     }
   };
 
@@ -477,6 +493,14 @@ export default function App() {
         return;
       }
       await signInWithGoogle();
+      if (auth?.currentUser) {
+        try {
+          localStorage.setItem(PASSAGE_PREFER_INTERNAL, '1');
+        } catch {
+          /* ignore */
+        }
+        setMode('internal');
+      }
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') {
         console.log("User closed the login popup");
@@ -519,19 +543,35 @@ export default function App() {
       const res = await fetch('/api/auth/firebase-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken })
+        body: JSON.stringify({ accessToken }),
+        credentials: 'include',
       });
+
+      try {
+        localStorage.setItem(PASSAGE_PREFER_INTERNAL, '1');
+      } catch {
+        /* ignore */
+      }
+      setMode('internal');
 
       if (!res.ok) {
         const msg = await res.text().catch(() => '');
         let parsed: any = null;
-        try { parsed = msg ? JSON.parse(msg) : null; } catch {}
-        throw new Error(parsed?.error || msg || "Failed to establish server session");
+        try {
+          parsed = msg ? JSON.parse(msg) : null;
+        } catch {
+          /* ignore */
+        }
+        console.warn('[OAuth] Drive session cookie failed:', parsed?.error || msg);
+        setIsAuthenticated(false);
+        alert(
+          'You are signed in. Chat history will save to this account.\n\nGoogle Drive did not connect (server error). Try Login again in a moment, or use Reset if stuck.'
+        );
+      } else {
+        console.log("[OAuth] Login successful!");
+        setIsAuthenticated(true);
+        fetchAllFolders();
       }
-
-      console.log("[OAuth] Login successful!");
-      setIsAuthenticated(true);
-      fetchAllFolders();
     } catch (e: any) {
       console.error("[OAuth] Login failed:", e);
       // Handle Firebase specific errors
@@ -681,7 +721,10 @@ export default function App() {
         let driveContext: string | undefined;
         if (mode === 'internal' && selectedDriveFile && isAuthenticated) {
           try {
-            const dr = await fetch(`/api/drive/file/${encodeURIComponent(selectedDriveFile.id)}/text`);
+            const dr = await fetch(
+              `/api/drive/file-text?fileId=${encodeURIComponent(selectedDriveFile.id)}`,
+              { credentials: 'include' }
+            );
             if (dr.ok) {
               const data = await dr.json();
               driveContext = `CONTENT FROM GOOGLE DRIVE FILE (${data.name}):\n\n${data.text}`;
@@ -793,24 +836,36 @@ export default function App() {
               <Home className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           )}
-          <div className="flex items-center gap-1 sm:gap-2 p-1 bg-white/5 rounded-full border border-white/10">
-            <button 
-              onClick={() => setMode('public')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
-                mode === 'public' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
-              }`}
+          {currentUser ? (
+            <div
+              className="flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full border border-accent/30 bg-accent/10 text-[8px] sm:text-[10px] uppercase tracking-widest text-accent"
+              title="Signed in — staff workspace"
             >
-              <Globe className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Public</span>
-            </button>
-            <button 
-              onClick={() => setMode('internal')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
-                mode === 'internal' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
-              }`}
-            >
-              <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Internal</span>
-            </button>
-          </div>
+              <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              <span className="hidden xs:inline">Internal workspace</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 sm:gap-2 p-1 bg-white/5 rounded-full border border-white/10">
+              <button
+                type="button"
+                onClick={() => setMode('public')}
+                className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
+                  mode === 'public' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
+                }`}
+              >
+                <Globe className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Public</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('internal')}
+                className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full text-[8px] sm:text-[10px] uppercase tracking-widest transition-all ${
+                  mode === 'internal' ? 'bg-accent text-white' : 'text-stone-400 hover:text-white'
+                }`}
+              >
+                <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> <span className="hidden xs:inline">Internal</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
@@ -846,9 +901,9 @@ export default function App() {
                 {isLoggingIn ? <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 animate-spin" /> : <LogIn className="w-3 h-3 sm:w-4 sm:h-4" />}
                 <span className="hidden sm:inline">{isLoggingIn ? 'Connecting...' : 'Login'}</span>
               </button>
-              <button 
+              <button
                 onClick={async () => {
-                  await fetch('/api/auth/logout');
+                  await fetch('/api/auth/logout', { credentials: 'include' });
                   window.location.reload();
                 }}
                 className="p-2 hover:bg-white/10 rounded-xl text-stone-500 text-[8px] uppercase tracking-widest"
@@ -971,12 +1026,13 @@ export default function App() {
                   {sessions.length === 0 && !currentUser && (
                     <div className="text-center py-8 px-4">
                       <p className="text-[10px] text-stone-600 italic">Sign in to save your chat history</p>
-                      <button 
-                        onClick={handleFirebaseLogin} 
-                        disabled={isFirebaseLoggingIn}
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogin}
+                        disabled={isLoggingIn}
                         className="mt-4 text-xs text-accent hover:underline disabled:opacity-50"
                       >
-                        {isFirebaseLoggingIn ? 'Connecting...' : 'Sign In'}
+                        {isLoggingIn ? 'Connecting...' : 'Sign in with Google'}
                       </button>
                       {!isFirebaseConfigured && (
                         <p className="mt-2 text-[9px] text-stone-600">
@@ -1439,7 +1495,10 @@ export default function App() {
                 BeighTech
               </a>
             </div>
-            <span className="text-accent/60">Status: {isAuthenticated ? 'Authenticated' : 'Guest'}</span>
+            <span className="text-accent/60">
+              Account: {currentUser ? (currentUser.email || 'Signed in') : 'Guest'} · Drive:{' '}
+              {isAuthenticated ? 'Connected' : 'Off'}
+            </span>
           </div>
         </div>
       </footer>

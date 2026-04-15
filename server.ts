@@ -5,11 +5,9 @@ import path from "path";
 import { google } from "googleapis";
 import session from "express-session";
 import cookieParser from "cookie-parser";
+import { extractDriveFileText } from "./api/_lib/driveText";
 
 const isProduction = process.env.NODE_ENV === "production";
-
-/** Max characters injected into the model from a single Drive file */
-const DRIVE_TEXT_MAX_CHARS = 120_000;
 
 async function startServer() {
   const app = express();
@@ -217,59 +215,17 @@ async function startServer() {
     }
   });
 
-  /** Plain text for Gemini context: exports Google Docs/Sheets, reads text/* and small JSON */
-  app.get("/api/drive/file/:fileId/text", async (req, res) => {
+  /** Same contract as Vercel `api/drive/file-text.ts` */
+  app.get("/api/drive/file-text", async (req, res) => {
     const tokens = (req.session as any).tokens;
-    if (!tokens) return res.status(401).json({ error: "Not authenticated" });
-
-    const client = createOAuthClient();
-    client.setCredentials(tokens);
-    const drive = google.drive({ version: "v3", auth: client });
-    const fileId = req.params.fileId;
-
+    if (!tokens?.access_token) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const fileId = String(req.query?.fileId || "").trim();
+    if (!fileId) return res.status(400).json({ error: "Missing fileId" });
     try {
-      const meta = await drive.files.get({
-        fileId,
-        fields: "id, name, mimeType",
-      });
-      const name = meta.data.name || fileId;
-      const mime = meta.data.mimeType || "";
-
-      let text = "";
-
-      if (mime === "application/vnd.google-apps.document") {
-        const exported = await drive.files.export(
-          { fileId, mimeType: "text/plain" },
-          { responseType: "arraybuffer" }
-        );
-        text = Buffer.from(exported.data as ArrayBuffer).toString("utf8");
-      } else if (mime === "application/vnd.google-apps.spreadsheet") {
-        const exported = await drive.files.export(
-          { fileId, mimeType: "text/csv" },
-          { responseType: "arraybuffer" }
-        );
-        text = Buffer.from(exported.data as ArrayBuffer).toString("utf8");
-      } else if (mime.startsWith("text/") || mime === "application/json") {
-        const media = await drive.files.get(
-          { fileId, alt: "media" },
-          { responseType: "arraybuffer" }
-        );
-        text = Buffer.from(media.data as ArrayBuffer).toString("utf8");
-      } else {
-        return res.json({
-          name,
-          mimeType: mime,
-          text: `[File type not inlined for AI context (${mime || "unknown"}). Use a Google Doc or plain text file, or paste an excerpt.]`,
-          unsupported: true,
-        });
-      }
-
-      const truncated = text.length > DRIVE_TEXT_MAX_CHARS;
-      if (truncated) {
-        text = text.slice(0, DRIVE_TEXT_MAX_CHARS) + "\n\n[Truncated for length]";
-      }
-
-      res.json({ name, mimeType: mime, text, truncated });
+      const out = await extractDriveFileText(tokens.access_token, fileId);
+      res.json(out);
     } catch (error: any) {
       console.error("Drive text export error:", error);
       res.status(500).json({ error: error?.message || "Failed to read file as text" });

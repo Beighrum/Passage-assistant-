@@ -7,7 +7,6 @@ import {
   getRedirectResult,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 /** Client Firebase config from env (Vercel + local .env). Do not commit secrets; set in Vercel Project → Environment Variables. */
 const firebaseConfig = {
@@ -21,12 +20,14 @@ const firebaseConfig = {
 };
 
 /**
- * Named Firestore DB from firebase-applet-config.json (AI Studio / non-default DB).
- * Override with VITE_FIREBASE_FIRESTORE_DATABASE_ID; use "(default)" for the default database only.
+ * Firestore database ID. `firebase-applet-config.json` is gitignored locally — do not import it in the bundle
+ * (Vercel builds would fail). Set `VITE_FIREBASE_FIRESTORE_DATABASE_ID` in Vercel, or rely on the default below.
+ * Use "(default)" in env to target the default database instead of this named DB.
  */
+const NAMED_FIRESTORE_DATABASE_ID = 'ai-studio-70149557-1599-445b-9e40-91b543c828af';
 const envDbId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID?.trim().replace(/^["']|["']$/g, '') || '';
 const firestoreDatabaseId =
-  envDbId === '(default)' ? '' : envDbId || firebaseAppletConfig.firestoreDatabaseId;
+  envDbId === '(default)' ? '' : envDbId || NAMED_FIRESTORE_DATABASE_ID;
 
 export const isFirebaseConfigured = !!(
   firebaseConfig.apiKey &&

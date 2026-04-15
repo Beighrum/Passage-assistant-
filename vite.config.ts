@@ -10,8 +10,14 @@ export default defineConfig(({mode}) => {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
     resolve: {
+      // Prefer browser builds for packages with export maps (e.g. @google/genai/web).
+      conditions: ['browser', 'module', 'import', 'default'],
       alias: {
         '@': path.resolve(__dirname, '.'),
+        '@google/genai/web': path.resolve(
+          __dirname,
+          'node_modules/@google/genai/dist/web/index.mjs'
+        ),
       },
     },
     server: {

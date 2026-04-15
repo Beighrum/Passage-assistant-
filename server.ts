@@ -5,7 +5,7 @@ import path from "path";
 import { google } from "googleapis";
 import session from "express-session";
 import cookieParser from "cookie-parser";
-import { extractDriveFileText } from "./api/lib/driveText";
+import { extractDriveFileText } from "./api/lib/driveText.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 

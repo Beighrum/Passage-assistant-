@@ -1,4 +1,4 @@
-import { buildSetTokenCookie } from '../lib/cookies';
+import { buildSetTokenCookie } from '../lib/cookies.js';
 
 /** Keep cookie value under typical 4KB header limits */
 const MAX_TOKEN_CHARS = 3500;

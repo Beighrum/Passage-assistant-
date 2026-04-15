@@ -1,4 +1,4 @@
-import { getCookieHeaderFromReq, getTokenFromCookieHeader } from '../lib/cookies';
+import { getCookieHeaderFromReq, getTokenFromCookieHeader } from '../lib/cookies.js';
 
 export default async function handler(req: any, res: any) {
   try {

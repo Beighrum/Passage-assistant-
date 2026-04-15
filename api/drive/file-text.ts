@@ -1,5 +1,5 @@
-import { getCookieHeaderFromReq, getTokenFromCookieHeader } from '../lib/cookies';
-import { extractDriveFileText } from '../lib/driveText';
+import { getCookieHeaderFromReq, getTokenFromCookieHeader } from '../lib/cookies.js';
+import { extractDriveFileText } from '../lib/driveText.js';
 
 export const config = {
   maxDuration: 60,

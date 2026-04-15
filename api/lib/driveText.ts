@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import * as pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 
 export const DRIVE_TEXT_MAX_CHARS = 120_000;
@@ -45,8 +45,13 @@ export async function extractDriveFileText(accessToken: string, fileId: string) 
       { responseType: 'arraybuffer' }
     );
     const buffer = Buffer.from(media.data as ArrayBuffer);
-    const data = await pdfParse.default(buffer);
-    text = data.text || '';
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const data = await parser.getText();
+      text = data.text || '';
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
   } else if (
     mime ===
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document'

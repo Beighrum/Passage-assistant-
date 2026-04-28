@@ -12,16 +12,18 @@
   ],
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 60
     }
   },
-  "rewrites": [
+  "routes": [
     {
-      "source": "/((?!api/|assets/).*)",
-      "destination": "/index.html"
+      "handle": "filesystem"
+    },
+    {
+      "src": "/((?!api/)(?!assets/).*)",
+      "dest": "/index.html"
     }
   ]
 }

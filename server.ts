@@ -17,7 +17,7 @@ async function startServer() {
     app.set("trust proxy", 1);
   }
 
-  app.use(express.json());
+  app.use(express.json({ limit: "4mb" }));
   app.use(cookieParser());
   app.use(
     session({
@@ -113,6 +113,12 @@ async function startServer() {
   app.get("/api/auth/status", (req, res) => {
     res.json({ isAuthenticated: !!(req.session as any).tokens });
   });
+
+  const { default: passageChatHandler } = await import("./api/chat.ts");
+  app.post("/api/chat", passageChatHandler);
+
+  const { default: passageReindexHandler } = await import("./api/reindex.ts");
+  app.post("/api/reindex", passageReindexHandler);
 
   // Debug endpoint to check environment variables (safe version)
   app.get("/api/debug/config", (req, res) => {

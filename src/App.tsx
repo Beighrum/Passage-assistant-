@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, FormEvent, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus, Trash2, SlidersHorizontal, Home } from 'lucide-react';
-import { generateResponse, generateImage, MessagePart } from './lib/gemini';
+import { generateResponseStream, generateImage, MessagePart } from './lib/gemini';
 import {
   auth,
   db,
@@ -101,6 +101,11 @@ export default function App() {
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const recognitionRef = useRef<any>(null);
   const [isImageSizeOpen, setIsImageSizeOpen] = useState(false);
+  /** Non-null while a text reply is streaming; updates as tokens arrive (empty string = stream started, no text yet). */
+  const [streamDraft, setStreamDraft] = useState<string | null>(null);
+  /** Visible text during stream — advances word-by-word toward `streamDraft` for a typewriter feel. */
+  const [streamRevealText, setStreamRevealText] = useState('');
+  const streamTargetRef = useRef('');
 
   /** Invalidates in-flight `/api/auth/status` results so a slow initial fetch cannot overwrite state after login sets the cookie. */
   const authCheckSeq = useRef(0);
@@ -470,11 +475,55 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  if (streamDraft !== null) {
+    streamTargetRef.current = streamDraft;
+  }
+
+  useEffect(() => {
+    if (streamDraft === null) {
+      setStreamRevealText('');
+    }
+  }, [streamDraft]);
+
+  /** Word-by-word reveal toward the latest streamed target (ref updates every render while streaming). */
+  useEffect(() => {
+    if (streamDraft === null) return;
+
+    const step = () => {
+      setStreamRevealText((prev) => {
+        const target = streamTargetRef.current;
+        if (target === '') return prev;
+        if (!target.startsWith(prev)) return target;
+        if (prev.length >= target.length) return prev;
+        const rest = target.slice(prev.length);
+        const backlog = rest.length;
+        const wordBursts = backlog > 220 ? 4 : backlog > 90 ? 2 : 1;
+        let add = '';
+        let rem = rest;
+        for (let b = 0; b < wordBursts && rem.length; b++) {
+          const m = rem.match(/^(\s*\S+)/);
+          if (m) {
+            add += m[1];
+            rem = rem.slice(m[1].length);
+          } else {
+            add += rem[0];
+            rem = rem.slice(1);
+            break;
+          }
+        }
+        return prev + add;
+      });
+    };
+
+    const id = window.setInterval(step, 34);
+    return () => window.clearInterval(id);
+  }, [streamDraft !== null]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, streamDraft, streamRevealText]);
 
   useEffect(() => {
     const el = composerRef.current;
@@ -802,20 +851,79 @@ export default function App() {
           }
         }
 
-        const history = messages.map(m => ({
+        let history: { role: 'user' | 'model'; parts: MessagePart[] }[] = messages.map(m => ({
           role: m.role,
           parts: [{ text: m.content }] as MessagePart[]
         }));
+        const last = messages[messages.length - 1];
+        if (last?.role === 'user' && last.content === userMessageContent) {
+          history = history.slice(0, -1);
+        }
 
-        const response = await generateResponse(
-          userMessageContent, 
-          history, 
-          mode, 
-          imagePart,
-          driveContext
-        );
-        
-        responseContent = response || "I'm sorry, I couldn't process that.";
+        /** Internal text-only: Claude + Supabase RAG via `/api/chat`. Gemini stays for Public + vision uploads + image-gen. */
+        const useInternalRag =
+          mode === 'internal' && !imagePart && !isImageRequest;
+
+        if (useInternalRag) {
+          let msgsForHistory = messages;
+          const lm = messages[messages.length - 1];
+          if (lm?.role === 'user' && lm.content === userMessageContent) {
+            msgsForHistory = messages.slice(0, -1);
+          }
+          const historyForApi = msgsForHistory.slice(-18).map((m) => ({
+            role: (m.role === 'model' ? 'assistant' : 'user') as 'assistant' | 'user',
+            content: m.content,
+          }));
+
+          let messagePayload = userMessageContent;
+          if (driveContext) {
+            messagePayload += `\n\n---\nAdditional context from selected Drive file:\n${driveContext}`;
+          }
+
+          const chatRes = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: messagePayload,
+              history: historyForApi,
+            }),
+          });
+          const raw = await chatRes.text().catch(() => '');
+          if (!chatRes.ok) {
+            throw new Error(raw || `Chat API failed (${chatRes.status})`);
+          }
+          const data = JSON.parse(raw) as {
+            text?: string;
+            citations?: Array<{ n?: number; name?: string; url?: string }>;
+          };
+          let text = String(data.text || '').trim();
+          const cites = Array.isArray(data.citations) ? data.citations : [];
+          if (cites.length) {
+            const lines = cites
+              .map(
+                (c) =>
+                  `- (${c.n ?? '?'}) ${c.name ?? 'Document'}${c.url ? ` — ${c.url}` : ''}`
+              )
+              .join('\n');
+            text += `\n\n---\nSources\n${lines}`;
+          }
+          responseContent = text || "I'm sorry, I couldn't process that.";
+        } else {
+          setStreamRevealText('');
+          setStreamDraft('');
+          const response = await generateResponseStream(
+            userMessageContent,
+            history,
+            mode,
+            (acc) => setStreamDraft(acc),
+            imagePart,
+            driveContext
+          );
+          setStreamRevealText(response || '');
+          setStreamDraft(null);
+
+          responseContent = response || "I'm sorry, I couldn't process that.";
+        }
 
         if (currentUser && sessionId) {
           await addDoc(collection(db, 'users', currentUser.uid, 'sessions', sessionId, 'messages'), {
@@ -841,6 +949,8 @@ export default function App() {
       setSelectedImage(null);
     } catch (error) {
       console.error("Failed to get AI response:", error);
+      setStreamRevealText('');
+      setStreamDraft(null);
       const errorContent = "The ethereal connection was interrupted. Please try again.";
       // Always surface an error message (guests + authed users). For authed users, persist to Firestore when possible.
       try {
@@ -868,7 +978,7 @@ export default function App() {
       <div className="fixed inset-0 z-0 atmosphere pointer-events-none" />
       
       {/* Header */}
-      <header className="relative z-[100] flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-white/5 backdrop-blur-md shrink-0">
+      <header className="relative z-[100] flex items-center justify-between px-4 sm:px-8 py-3 sm:py-4 border-b border-white/5 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-2 sm:gap-3">
           <button
             type="button"
@@ -1013,7 +1123,7 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex-1 min-h-0 flex flex-col max-w-6xl mx-auto w-full px-2 sm:px-4 py-4 sm:py-8 overflow-hidden">
+      <main className="relative z-10 flex-1 min-h-0 flex flex-col max-w-6xl mx-auto w-full px-2 sm:px-4 py-2 sm:py-4 overflow-hidden">
         <div className="flex-1 min-h-0 flex gap-4 sm:gap-6 overflow-hidden relative">
           
           {/* History + Drive: overlay only (no persistent desktop column) */}
@@ -1300,7 +1410,7 @@ export default function App() {
             ) : (
               <div
                 ref={scrollRef}
-                className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-6 sm:space-y-8 pr-2 sm:pr-4 scrollbar-hide"
+                className="flex-1 min-h-0 w-full max-w-4xl mx-auto overflow-y-auto overflow-x-hidden space-y-6 sm:space-y-8 pr-2 sm:pr-4 scrollbar-hide"
               >
                 <AnimatePresence initial={false}>
                   {messages.map((message) => (
@@ -1366,7 +1476,31 @@ export default function App() {
                     </motion.div>
                   ))}
                 </AnimatePresence>
-                {isLoading && (
+                {streamDraft !== null && (
+                  <div className="flex gap-3 sm:gap-4">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center">
+                      <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent" />
+                    </div>
+                    <div className="max-w-[85%] sm:max-w-[80%] space-y-1">
+                      <div className="p-3 sm:p-4 rounded-2xl overflow-hidden glass text-stone-200 text-sm sm:text-base leading-relaxed">
+                        {streamDraft.length === 0 ? (
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 animate-spin text-accent shrink-0" />
+                            <span className="text-[10px] sm:text-xs text-stone-400 italic">Passage is composing…</span>
+                          </div>
+                        ) : (
+                          <div className="whitespace-pre-wrap">
+                            {renderContent(streamRevealText)}
+                            {streamRevealText.length < streamDraft.length && (
+                              <span className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.15em] bg-accent/80 animate-pulse rounded-sm" aria-hidden />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {isLoading && streamDraft === null && (
                   <div className="flex gap-3 sm:gap-4">
                     <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center animate-pulse">
                       <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent" />
@@ -1383,7 +1517,7 @@ export default function App() {
             )}
 
             {/* Input Area */}
-            <div className="mt-3 sm:mt-6 relative w-full max-w-3xl px-2 sm:px-0 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-0">
+            <div className="mt-2 sm:mt-4 relative w-full max-w-4xl px-2 sm:px-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:pb-0">
               {selectedImage && (
                 <div className="absolute bottom-full mb-3 left-0 flex items-center gap-2 p-2 glass rounded-xl">
                   <img src={selectedImage.preview} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
@@ -1502,7 +1636,7 @@ export default function App() {
       </main>
 
       {/* Footer Decoration */}
-      <footer className="relative z-[100] px-4 sm:px-8 py-3 sm:py-6 flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-6 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-6">
+      <footer className="relative z-[100] px-4 sm:px-8 py-2 sm:py-4 flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-4 border-t border-white/5 bg-black/20 backdrop-blur-sm shrink-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:pb-4">
         <div className="flex flex-col items-center sm:items-start gap-4">
           <span className="text-[10px] uppercase tracking-widest text-stone-500">&copy; 2026 Passage Theatre Company</span>
           <div className="flex flex-wrap items-center gap-4 justify-center sm:justify-start">

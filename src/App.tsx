@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, FormEvent, ChangeEvent } from 'react';
+import type { FC } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus, Trash2, SlidersHorizontal, Home } from 'lucide-react';
 import { generateResponseStream, generateImage, MessagePart } from './lib/gemini';
@@ -125,7 +126,15 @@ export default function App() {
       scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - thresholdPx;
     if (opts?.force || userPinnedToBottomRef.current || nearBottom) {
       userPinnedToBottomRef.current = true;
-      messagesEndRef.current?.scrollIntoView({ block: 'end' });
+      const scrollToBottom = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight - el.clientHeight;
+      };
+      requestAnimationFrame(() => {
+        scrollToBottom();
+        requestAnimationFrame(scrollToBottom);
+      });
     }
   }, []);
 
@@ -492,17 +501,19 @@ export default function App() {
 
   // Track whether the user has manually scrolled away from the bottom.
   useEffect(() => {
-    const scroller = scrollRef.current;
-    if (!scroller) return;
     const onScroll = () => {
+      const scroller = scrollRef.current;
+      if (!scroller) return;
       const thresholdPx = 160;
       const nearBottom =
         scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - thresholdPx;
       userPinnedToBottomRef.current = nearBottom;
     };
-    scroller.addEventListener('scroll', onScroll, { passive: true });
-    return () => scroller.removeEventListener('scroll', onScroll as any);
-  }, [scrollRef.current]);
+
+    const scroller = scrollRef.current;
+    scroller?.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller?.removeEventListener('scroll', onScroll as any);
+  }, [messages.length]);
 
   // Keep pinned to bottom as new messages / streaming tokens arrive.
   useEffect(() => {
@@ -790,7 +801,7 @@ export default function App() {
     }
     if (last < safeText.length) parts.push({ kind: 'text', value: safeText.slice(last) });
 
-    const MD: React.FC<{ value: string }> = ({ value }) => (
+    const MD: FC<{ value: string }> = ({ value }) => (
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

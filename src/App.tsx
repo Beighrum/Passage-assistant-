@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback, FormEvent, ChangeEvent } from
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Sparkles, User, Bot, Loader2, Command, Image as ImageIcon, Lock, Globe, LogIn, FileText, X, Volume2, Mic, MicOff, History, Plus, Trash2, SlidersHorizontal, Home } from 'lucide-react';
 import { generateResponseStream, generateImage, MessagePart } from './lib/gemini';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   auth,
   db,
@@ -111,6 +113,21 @@ export default function App() {
 
   /** Invalidates in-flight `/api/auth/status` results so a slow initial fetch cannot overwrite state after login sets the cookie. */
   const authCheckSeq = useRef(0);
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const userPinnedToBottomRef = useRef(true);
+
+  const maybeAutoScroll = useCallback((opts?: { force?: boolean }) => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const thresholdPx = 140;
+    const nearBottom =
+      scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - thresholdPx;
+    if (opts?.force || userPinnedToBottomRef.current || nearBottom) {
+      userPinnedToBottomRef.current = true;
+      messagesEndRef.current?.scrollIntoView({ block: 'end' });
+    }
+  }, []);
 
   const PUBLIC_FOLDER_ID = '1SGoxWRv2WE_SKy4MwJhCl3A6nSy2KGwS';
   const INTERNAL_FOLDER_IDS = ['1l3KRkEaOKsVJLizriswqHn-whyc93aUk', '1j07-wxP7u9r9Y-V4ootX4KN3XB3YY0X4'];
@@ -413,32 +430,7 @@ export default function App() {
       });
   };
 
-  const renderContent = (content: string) => {
-    // Replace [PURPLE]text[/PURPLE] with styled span or link
-    const parts = content.split(/(\[PURPLE\].*?\[\/PURPLE\])/g);
-    return parts.map((part, i) => {
-      if (part.startsWith('[PURPLE]')) {
-        const text = part.replace('[PURPLE]', '').replace('[/PURPLE]', '');
-        const isTicketing = text.toLowerCase().includes('ticket') || text.toLowerCase().includes('buy');
-        
-        if (isTicketing) {
-          return (
-            <a 
-              key={i} 
-              href="https://www.passagetheatre.org/tickets" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="highlight-purple underline decoration-accent/30"
-            >
-              {text}
-            </a>
-          );
-        }
-        return <span key={i} className="highlight-purple">{text}</span>;
-      }
-      return part;
-    });
-  };
+  const renderContent = (content: string) => renderMarkdown(content);
 
   useEffect(() => {
     void checkAuthStatus();
@@ -497,6 +489,34 @@ export default function App() {
       fetchAllFolders();
     }
   }, [isAuthenticated]);
+
+  // Track whether the user has manually scrolled away from the bottom.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const onScroll = () => {
+      const thresholdPx = 160;
+      const nearBottom =
+        scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - thresholdPx;
+      userPinnedToBottomRef.current = nearBottom;
+    };
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll as any);
+  }, [scrollRef.current]);
+
+  // Keep pinned to bottom as new messages / streaming tokens arrive.
+  useEffect(() => {
+    maybeAutoScroll();
+  }, [messages.length, streamRevealText, streamDraft, maybeAutoScroll]);
+
+  // When the mobile keyboard opens/closes, stay anchored to the latest message.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const vv = window.visualViewport;
+    const onResize = () => maybeAutoScroll({ force: true });
+    vv?.addEventListener('resize', onResize);
+    return () => vv?.removeEventListener('resize', onResize);
+  }, [maybeAutoScroll]);
 
   if (streamDraft !== null) {
     streamTargetRef.current = streamDraft;
@@ -757,6 +777,51 @@ export default function App() {
     });
   };
 
+  const renderMarkdown = useCallback((text: string) => {
+    const safeText = String(text || '');
+    const parts: Array<{ kind: 'text' | 'purple'; value: string }> = [];
+    const re = /\[PURPLE\]([\s\S]*?)\[\/PURPLE\]/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(safeText))) {
+      if (m.index > last) parts.push({ kind: 'text', value: safeText.slice(last, m.index) });
+      parts.push({ kind: 'purple', value: m[1] || '' });
+      last = m.index + m[0].length;
+    }
+    if (last < safeText.length) parts.push({ kind: 'text', value: safeText.slice(last) });
+
+    const MD: React.FC<{ value: string }> = ({ value }) => (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: (props) => (
+            <a {...props} className="highlight-purple underline decoration-accent/30" target="_blank" rel="noopener noreferrer" />
+          ),
+          hr: () => <hr className="my-4 border-white/10" />,
+          strong: (props) => <strong {...props} className="text-white font-semibold" />,
+          li: (props) => <li {...props} className="my-1" />,
+        }}
+      >
+        {value}
+      </ReactMarkdown>
+    );
+
+    if (parts.length === 0) return <MD value={safeText} />;
+    return (
+      <span>
+        {parts.map((p, i) =>
+          p.kind === 'purple' ? (
+            <span key={i} className="highlight-purple">
+              <MD value={p.value} />
+            </span>
+          ) : (
+            <MD key={i} value={p.value} />
+          )
+        )}
+      </span>
+    );
+  }, []);
+
   const handleSubmit = async (e?: FormEvent) => {
     e?.preventDefault();
     if (mode === 'internal' && !currentUser) {
@@ -922,34 +987,81 @@ export default function App() {
             messagePayload += `\n\n---\nAdditional context from selected Drive file:\n${driveContext}`;
           }
 
+          // Stream internal RAG responses via SSE for Claude-like typing.
+          setStreamRevealText('');
+          setStreamDraft('');
+
           const chatRes = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               message: messagePayload,
               history: historyForApi,
+              stream: true,
             }),
           });
-          const raw = await chatRes.text().catch(() => '');
+
           if (!chatRes.ok) {
+            const raw = await chatRes.text().catch(() => '');
             throw new Error(raw || `Chat API failed (${chatRes.status})`);
           }
-          const data = JSON.parse(raw) as {
-            text?: string;
-            citations?: Array<{ n?: number; name?: string; url?: string }>;
+
+          const reader = chatRes.body?.getReader();
+          if (!reader) throw new Error('Chat API stream unavailable');
+          const decoder = new TextDecoder('utf-8');
+          let buffer = '';
+          let accumulated = '';
+          let cites: Array<{ n?: number; name?: string; url?: string }> = [];
+
+          const parseSse = (chunk: string) => {
+            buffer += chunk;
+            // Events are separated by blank lines.
+            while (true) {
+              const sep = buffer.indexOf('\n\n');
+              if (sep === -1) break;
+              const rawEvent = buffer.slice(0, sep);
+              buffer = buffer.slice(sep + 2);
+              const lines = rawEvent.split('\n').map((l) => l.trimEnd());
+              let eventName = 'message';
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith('event:')) eventName = line.slice('event:'.length).trim();
+                else if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trim());
+              }
+              const data = dataLines.join('\n');
+              if (eventName === 'delta') {
+                accumulated += data;
+                setStreamDraft(accumulated);
+              } else if (eventName === 'citations') {
+                try {
+                  const parsed = JSON.parse(data);
+                  if (Array.isArray(parsed)) cites = parsed;
+                } catch {
+                  /* ignore */
+                }
+              } else if (eventName === 'error') {
+                throw new Error(data || 'Chat stream error');
+              }
+            }
           };
-          let text = String(data.text || '').trim();
-          const cites = Array.isArray(data.citations) ? data.citations : [];
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            parseSse(decoder.decode(value, { stream: true }));
+          }
+
+          setStreamRevealText(accumulated || '');
+          setStreamDraft(null);
+
+          let finalText = (accumulated || '').trim();
           if (cites.length) {
             const lines = cites
-              .map(
-                (c) =>
-                  `- (${c.n ?? '?'}) ${c.name ?? 'Document'}${c.url ? ` — ${c.url}` : ''}`
-              )
+              .map((c) => `- (${c.n ?? '?'}) ${c.name ?? 'Document'}${c.url ? ` — ${c.url}` : ''}`)
               .join('\n');
-            text += `\n\n---\nSources\n${lines}`;
+            finalText += `\n\n---\nSources\n${lines}`;
           }
-          responseContent = text || "I'm sorry, I couldn't process that.";
+          responseContent = finalText || "I'm sorry, I couldn't process that.";
         } else {
           setStreamRevealText('');
           setStreamDraft('');
@@ -1555,6 +1667,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
             )}
 

@@ -34,9 +34,37 @@ async function callClaude(opts: { system: string; messages: ChatTurn[] }) {
   return text as string;
 }
 
+async function callClaudeStream(opts: { system: string; messages: ChatTurn[] }) {
+  const apiKey = mustGetEnv("ANTHROPIC_API_KEY");
+  const model = getOptionalEnv("ANTHROPIC_MODEL") || "claude-sonnet-4-6";
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      system: opts.system,
+      messages: opts.messages.map((m) => ({ role: m.role, content: m.content })),
+      stream: true,
+    }),
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    throw new Error(`Claude API failed (${resp.status}): ${t}`);
+  }
+  if (!resp.body) throw new Error("Claude stream has no body");
+  return resp.body;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   try {
+    const wantStream = Boolean(req.body?.stream);
     const message = String(req.body?.message || "").trim();
     if (!message) return res.status(400).json({ error: "Missing message" });
 
@@ -76,9 +104,70 @@ export default async function handler(req: any, res: any) {
     }
     turns.push({ role: "user", content: message });
 
-    const text = await callClaude({ system, messages: turns.slice(-18) });
+    if (!wantStream) {
+      const text = await callClaude({ system, messages: turns.slice(-18) });
+      return res.status(200).json({ text, citations });
+    }
 
-    return res.status(200).json({ text, citations });
+    // Stream response as Server-Sent Events (SSE) so the client can render deltas.
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    // @ts-ignore
+    res.flushHeaders?.();
+
+    const body = await callClaudeStream({ system, messages: turns.slice(-18) });
+    const reader = body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    const writeEvent = (event: string, data: any) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Anthropic streams as SSE; parse line-by-line.
+        let idx: number;
+        while ((idx = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, idx).trimEnd();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice("data:".length).trim();
+          if (!payload || payload === "[DONE]") continue;
+          let json: any = null;
+          try {
+            json = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          // We forward only text deltas.
+          if (json?.type === "content_block_delta" && json?.delta?.type === "text_delta") {
+            const delta = String(json.delta.text || "");
+            if (delta) writeEvent("delta", delta);
+          }
+        }
+      }
+
+      // Send citations at the end so the UI can render them.
+      writeEvent("citations", citations);
+      writeEvent("done", "ok");
+      res.end();
+    } catch (e) {
+      try {
+        writeEvent("error", { message: (e as any)?.message || "Stream failed" });
+      } catch {
+        /* ignore */
+      }
+      res.end();
+    }
   } catch (e: any) {
     console.error("[chat] failed:", e);
     return res.status(500).json({ error: e?.message || "Chat failed" });

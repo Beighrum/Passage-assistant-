@@ -1,11 +1,14 @@
-import { indexDriveFolderIncremental, type IndexCursor } from "./lib/indexDrive.js";
+import type { IndexCursor } from "./lib/indexDrive.js";
 import { mustGetEnv } from "./lib/ragEnv.js";
 import { readJsonBody } from "./lib/readJsonBody.js";
 
 export default async function handler(req: any, res: any) {
+  // Reject non-POST before loading Drive/pdf/googleapis (avoids GET crashes + heavy cold imports).
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
+    const { indexDriveFolderIncremental } = await import("./lib/indexDrive.js");
+
     const body = await readJsonBody(req);
 
     let rootFolderId = String(body.rootFolderId ?? "").trim();
@@ -47,4 +50,3 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ ok: false, error: e?.message || "Indexing failed" });
   }
 }
-

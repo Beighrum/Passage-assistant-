@@ -1119,12 +1119,12 @@ export default function App() {
   };
 
   return (
-    <div className="relative flex h-[100svh] min-h-0 w-screen flex-col overflow-hidden bg-[#0a0a0a] [height:100dvh]">
+    <div className="relative flex h-[100svh] min-h-0 w-screen flex-col overflow-hidden bg-[#05020a] [height:100dvh]">
       {/* Background Atmosphere */}
       <div className="fixed inset-0 z-0 atmosphere pointer-events-none" />
       
       {/* Header */}
-      <header className="relative z-[100] shrink-0 border-b border-white/10 bg-stone-950/25 px-4 py-3 backdrop-blur-md sm:px-8 sm:py-3.5">
+      <header className="relative z-[100] shrink-0 border-b border-white/5 bg-stone-950/10 px-4 py-3 backdrop-blur-md sm:px-8 sm:py-3.5">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <button
@@ -1688,12 +1688,11 @@ export default function App() {
               </div>
             )}
 
-            {/* Composer — glass strip above footer; aligns with max-w-4xl transcript */}
-            <div className="relative z-20 mt-auto w-full shrink-0 border-t border-white/10 bg-white/5 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur-md sm:pb-3">
-              <div className="relative mx-auto w-full max-w-4xl">
-                <div className="rounded-2xl border border-white/10 bg-stone-900/40 p-2 backdrop-blur-xl sm:p-2.5">
+            {/* Composer — single row (textarea + inline tools + send); no nested glass frames */}
+            <div className="relative z-20 mt-auto w-full shrink-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:pb-3">
+              <div className="relative mx-auto w-full max-w-4xl px-1 sm:px-0">
               {selectedImage && (
-                <div className="absolute bottom-full mb-3 left-0 flex items-center gap-2 rounded-xl border border-white/10 bg-stone-900/50 p-2 backdrop-blur-md">
+                <div className="absolute bottom-full mb-3 left-0 flex items-center gap-2 rounded-xl border border-white/5 bg-stone-900/40 p-2 backdrop-blur-md">
                   <img src={selectedImage.preview} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
                   <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-white/10 rounded-full">
                     <X className="w-3 h-3 text-stone-400" />
@@ -1733,7 +1732,7 @@ export default function App() {
                             ? "Draft a grant… (Connect Drive to attach files from Drive)"
                             : "Draft a grant or analyze data..."
                     }
-                    className="w-full max-w-full resize-none overflow-x-hidden overflow-y-auto rounded-xl border border-white/10 bg-white/5 py-3.5 pl-4 pr-20 text-[16px] leading-relaxed text-stone-100 shadow-none backdrop-blur-md placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-accent/45 disabled:cursor-not-allowed disabled:opacity-60 sm:py-4 sm:pl-6 sm:pr-32 sm:text-sm [transform:translateZ(0)]"
+                    className="w-full max-w-full resize-none overflow-x-hidden overflow-y-auto rounded-2xl border border-purple-500/15 bg-purple-950/25 py-3.5 pl-4 pr-20 text-[16px] leading-relaxed text-stone-100 shadow-none backdrop-blur-xl placeholder:text-stone-500 focus:border-purple-400/25 focus:outline-none focus:ring-2 focus:ring-accent/35 disabled:cursor-not-allowed disabled:opacity-60 sm:py-4 sm:pl-6 sm:pr-32 sm:text-sm [transform:translateZ(0)]"
                   />
                   <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 sm:gap-1">
                     <button
@@ -1808,7 +1807,6 @@ export default function App() {
                   <Send className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               </form>
-                </div>
               </div>
             </div>
           </div>
@@ -1816,7 +1814,7 @@ export default function App() {
       </main>
 
       {/* Footer Decoration */}
-      <footer className="relative z-[100] flex shrink-0 flex-col gap-6 border-t border-white/10 bg-black/10 px-4 pt-4 pb-8 backdrop-blur-md sm:flex-row sm:items-end sm:justify-between sm:px-8">
+      <footer className="relative z-[100] flex shrink-0 flex-col gap-6 border-t border-white/5 bg-black/5 px-4 pt-4 pb-8 backdrop-blur-sm sm:flex-row sm:items-end sm:justify-between sm:px-8">
         <div className="flex flex-col items-center gap-4 sm:items-start">
           <span className="text-[10px] uppercase tracking-widest text-stone-500">&copy; 2026 Passage Theatre Company</span>
           <div className="flex flex-wrap items-center justify-center gap-4 sm:justify-start">

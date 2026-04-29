@@ -40,6 +40,7 @@ export async function crawlDriveFolder(
   const folderQueue: string[] = resume?.folderQueue?.length
     ? [...resume.folderQueue]
     : [opts.rootFolderId];
+  const queued = new Set(folderQueue);
   let pageToken: string | undefined = resume?.pageToken || opts.pageToken;
 
   const out: DriveFileLite[] = [];
@@ -69,10 +70,22 @@ export async function crawlDriveFolder(
     for (const f of files) {
       out.push(f);
       if (f.mimeType === "application/vnd.google-apps.folder") {
-        folderQueue.push(f.id);
+        if (!queued.has(f.id)) {
+          folderQueue.push(f.id);
+          queued.add(f.id);
+        }
       }
       if (out.length >= maxFiles) {
-        return { files: out, next: { folderQueue, pageToken: resp.data.nextPageToken || undefined } };
+        const nextPage = resp.data.nextPageToken || undefined;
+        // If we've exhausted the current folder page listing, advance to next folder
+        // before returning cursor so we don't restart this same folder forever.
+        if (!nextPage) {
+          folderQueue.shift();
+          pageToken = undefined;
+        } else {
+          pageToken = nextPage;
+        }
+        return { files: out, next: { folderQueue, pageToken } };
       }
     }
 

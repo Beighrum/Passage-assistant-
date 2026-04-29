@@ -41,17 +41,28 @@ export async function extractDriveFileText(accessToken: string, fileId: string) 
     );
     text = Buffer.from(media.data as ArrayBuffer).toString('utf8');
   } else if (mime === 'application/pdf') {
-    const media = await drive.files.get(
-      { fileId, alt: 'media' },
-      { responseType: 'arraybuffer' }
-    );
-    const buffer = Buffer.from(media.data as ArrayBuffer);
-    const parser = new PDFParse({ data: buffer });
     try {
-      const data = await parser.getText();
-      text = data.text || '';
-    } finally {
-      await parser.destroy().catch(() => {});
+      const media = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'arraybuffer' }
+      );
+      const buffer = Buffer.from(media.data as ArrayBuffer);
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const data = await parser.getText();
+        text = data.text || '';
+      } finally {
+        await parser.destroy().catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[driveText] PDF parsing skipped:', name, err);
+      return {
+        name,
+        mimeType: mime,
+        text: '[PDF parsing unavailable in current runtime. Please convert PDF to Google Doc or upload text excerpt.]',
+        unsupported: true as const,
+        truncated: false,
+      };
     }
   } else if (
     mime ===

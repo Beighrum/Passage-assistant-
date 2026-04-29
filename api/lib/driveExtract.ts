@@ -42,14 +42,20 @@ export async function extractTextFromDriveFile(
     const media = await drive.files.get({ fileId: id, alt: "media" }, { responseType: "arraybuffer" });
     text = Buffer.from(media.data as ArrayBuffer).toString("utf8");
   } else if (mime === "application/pdf") {
-    const media = await drive.files.get({ fileId: id, alt: "media" }, { responseType: "arraybuffer" });
-    const buffer = Buffer.from(media.data as ArrayBuffer);
-    const parser = new PDFParse({ data: buffer });
     try {
-      const data = await parser.getText();
-      text = data.text || "";
-    } finally {
-      await parser.destroy().catch(() => {});
+      const media = await drive.files.get({ fileId: id, alt: "media" }, { responseType: "arraybuffer" });
+      const buffer = Buffer.from(media.data as ArrayBuffer);
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const data = await parser.getText();
+        text = data.text || "";
+      } finally {
+        await parser.destroy().catch(() => {});
+      }
+    } catch (err) {
+      // pdf-parse/pdfjs worker issues should not stop indexing all other files.
+      console.warn("[driveExtract] PDF parsing skipped:", file.name || id, err);
+      return { text: "", truncated: false, unsupported: true };
     }
   } else if (mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     const media = await drive.files.get({ fileId: id, alt: "media" }, { responseType: "arraybuffer" });

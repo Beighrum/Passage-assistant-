@@ -44,7 +44,7 @@ export default async function handler(req: any, res: any) {
     const queryEmbedding = await embedQuery(message);
     const matches = await matchChunks(queryEmbedding, {
       count: Number(req.body?.topK || 8),
-      threshold: Number(req.body?.threshold || 0.72),
+      threshold: Number(req.body?.threshold ?? 0.5),
     });
 
     const citations = matches.map((m, i) => ({

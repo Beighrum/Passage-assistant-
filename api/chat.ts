@@ -1,6 +1,7 @@
 import { embedQuery } from "./lib/voyageEmbeddings.js";
 import { matchChunks } from "./lib/supabaseRag.js";
 import { mustGetEnv, getOptionalEnv } from "./lib/ragEnv.js";
+import { INTERNAL_PASSAGE_INSTITUTIONAL } from "./lib/passageKnowledge.js";
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -69,11 +70,17 @@ export default async function handler(req: any, res: any) {
     if (!message) return res.status(400).json({ error: "Missing message" });
 
     const history = (req.body?.history || []) as Array<{ role: string; content: string }>;
-    const queryEmbedding = await embedQuery(message);
-    const matches = await matchChunks(queryEmbedding, {
-      count: Number(req.body?.topK || 8),
-      threshold: Number(req.body?.threshold ?? 0.5),
-    });
+
+    let matches: Awaited<ReturnType<typeof matchChunks>> = [];
+    try {
+      const queryEmbedding = await embedQuery(message);
+      matches = await matchChunks(queryEmbedding, {
+        count: Number(req.body?.topK || 8),
+        threshold: Number(req.body?.threshold ?? 0.5),
+      });
+    } catch (ragErr) {
+      console.error("[chat] RAG retrieval failed (continuing with institutional context only):", ragErr);
+    }
 
     const citations = matches.map((m, i) => ({
       n: i + 1,
@@ -94,7 +101,19 @@ export default async function handler(req: any, res: any) {
             )
             .join("\n\n---\n\n");
 
-    const system = `You are the Passage Theatre Assistant.\n\nYou have access to a private Passage Theatre knowledge base (Google Drive) via the SOURCES provided.\n\nRULES:\n- Answer the user using the SOURCES when relevant.\n- When you use a SOURCE, cite it inline like: (Source [2]: Strategic Plan)\n- If the SOURCES do not contain the answer, say so plainly and do not invent citations.\n\nSOURCES:\n${contextBlock}`;
+    const system = `${INTERNAL_PASSAGE_INSTITUTIONAL}
+
+You are the Passage Theatre Assistant for internal staff.
+
+You also receive excerpts from a Supabase-indexed Google Drive corpus as SOURCES.
+
+RULES:
+- Use SOURCES when they contain relevant facts; cite inline like (Source [2]: Strategic Plan).
+- When SOURCES are empty or off-topic BUT the question is answered by INSTITUTIONAL FACTS above, answer from those facts. Do not claim you have no information about Passage leadership or pillars if those facts apply.
+- When neither SOURCES nor institutional facts suffice, say so plainly and do not invent citations.
+
+SOURCES:
+${contextBlock}`;
 
     const turns: ChatTurn[] = [];
     for (const t of history) {
@@ -127,6 +146,12 @@ export default async function handler(req: any, res: any) {
       res.write(`data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`);
     };
 
+    /** JSON-encoded chunks so spaces/newlines inside deltas cannot break SSE framing; client must JSON.parse. */
+    const writeDelta = (text: string) => {
+      res.write(`event: delta\n`);
+      res.write(`data: ${JSON.stringify(text)}\n\n`);
+    };
+
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -151,7 +176,7 @@ export default async function handler(req: any, res: any) {
           // We forward only text deltas.
           if (json?.type === "content_block_delta" && json?.delta?.type === "text_delta") {
             const delta = String(json.delta.text || "");
-            if (delta) writeEvent("delta", delta);
+            if (delta) writeDelta(delta);
           }
         }
       }

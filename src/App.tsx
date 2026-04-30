@@ -1072,12 +1072,21 @@ export default function App() {
               const dataLines: string[] = [];
               for (const line of lines) {
                 if (line.startsWith('event:')) eventName = line.slice('event:'.length).trim();
-                else if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trim());
+                else if (line.startsWith('data:')) {
+                  let v = line.slice('data:'.length);
+                  if (v.startsWith(' ')) v = v.slice(1);
+                  dataLines.push(v);
+                }
               }
               const data = dataLines.join('\n');
               if (eventName === 'delta') {
-                accumulated += data;
-                // Render deltas immediately for Claude-like streaming (don't rely on the Gemini typewriter loop).
+                let piece = data;
+                try {
+                  piece = data ? (JSON.parse(data) as string) : '';
+                } catch {
+                  /* legacy server sent raw text */
+                }
+                accumulated += piece;
                 setStreamRevealText(accumulated);
               } else if (eventName === 'citations') {
                 try {

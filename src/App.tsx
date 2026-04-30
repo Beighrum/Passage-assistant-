@@ -10,7 +10,7 @@ import {
   db,
   getRedirectAuthResult,
   isFirebaseConfigured,
-  shouldUseFirebaseAuthRedirectAsync,
+  shouldUseFirebaseAuthRedirectSync,
   signInWithDrive,
   signInWithGoogle,
   signInWithGoogleRedirect,
@@ -706,7 +706,8 @@ export default function App() {
         return;
       }
 
-      if (await shouldUseFirebaseAuthRedirectAsync()) {
+      // Must be synchronous to preserve Safari user-gesture for redirect.
+      if (shouldUseFirebaseAuthRedirectSync()) {
         const u = auth?.currentUser ?? currentUser;
         if (!u) {
           console.log('[OAuth] Redirect step 1: Firebase Google sign-in (mobile Safari / Brave)');

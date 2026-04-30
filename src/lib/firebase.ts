@@ -113,14 +113,31 @@ export async function shouldUseFirebaseAuthRedirectAsync(): Promise<boolean> {
   return false;
 }
 
-/** Popup on desktop Chrome; redirect on mobile Safari / Brave (and similar). Returns null when redirect starts (page navigates away). */
-export const signInWithGoogle = async (): Promise<UserCredential | null> => {
+/**
+ * Popup on desktop Chrome; redirect on iOS Safari / mobile (and Brave when detectable).
+ *
+ * Critical: DO NOT `await` before `signInWithRedirect` or Safari can treat it as not user-initiated and block it.
+ * Returns null when redirect starts (page navigates away).
+ */
+export const signInWithGoogle = (): Promise<UserCredential | null> => {
   if (!auth) throw new Error('Firebase is not configured');
-  if (await shouldUseFirebaseAuthRedirectAsync()) {
-    await signInWithRedirect(auth, googleSignInProvider);
-    return null;
+
+  if (shouldUseFirebaseAuthRedirectSync()) {
+    return signInWithRedirect(auth, googleSignInProvider).then(() => null);
   }
-  return signInWithPopup(auth, googleSignInProvider);
+
+  return signInWithPopup(auth, googleSignInProvider).catch(async (e: any) => {
+    // If a popup is blocked (common in Brave / hardened browsers), fall back to redirect.
+    if (e?.code === 'auth/popup-blocked' || e?.code === 'auth/cancelled-popup-request') {
+      try {
+        await signInWithRedirect(auth, googleSignInProvider);
+        return null;
+      } catch {
+        // Fall through to rethrow the original popup error if redirect also fails.
+      }
+    }
+    throw e;
+  });
 };
 
 export const signInWithGoogleRedirect = () => {
@@ -202,3 +219,9 @@ export const getRedirectAuthResult = (): Promise<RedirectAuthPayload | null> => 
   }
   return redirectResultOnce;
 };
+
+/** Start listening for redirect results ASAP (before React mounts). Safe to call multiple times. */
+export function primeRedirectResult(): void {
+  if (typeof window === 'undefined') return;
+  void getRedirectAuthResult();
+}

@@ -3,6 +3,20 @@ import { buildSetTokenCookie } from '../lib/cookies.js';
 /** Keep cookie value under typical 4KB header limits */
 const MAX_TOKEN_CHARS = 3500;
 
+/** Only persist tokens that can call Drive API — avoids marking session “authenticated” with profile-only OAuth tokens (mobile step 1). */
+async function accessTokenHasDriveReadonly(accessToken: string): Promise<boolean> {
+  try {
+    const url = `https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(accessToken)}`;
+    const r = await fetch(url, { method: 'GET' });
+    if (!r.ok) return false;
+    const data = (await r.json()) as { scope?: string };
+    const scope = typeof data.scope === 'string' ? data.scope : '';
+    return /\bdrive\.readonly\b/.test(scope) || /\bauth\/drive\.readonly\b/.test(scope);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Read JSON POST body on Vercel Node serverless (req may be IncomingMessage with
  * unparsed body, or body may already be set). Avoids `node:stream/consumers`,
@@ -72,6 +86,19 @@ export default async function handler(req: any, res: any) {
       res.end(
         JSON.stringify({
           error: 'Access token too large for cookie storage',
+        })
+      );
+      return;
+    }
+
+    const driveOk = await accessTokenHasDriveReadonly(accessToken);
+    if (!driveOk) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(
+        JSON.stringify({
+          error: 'Access token missing Google Drive read scope',
+          code: 'MISSING_DRIVE_SCOPE',
         })
       );
       return;

@@ -11,9 +11,9 @@ import {
   getRedirectAuthResult,
   isFirebaseConfigured,
   signInWithDrive,
-  signInWithDriveRedirect,
   signInWithGoogle,
   signInWithGoogleRedirect,
+  reauthenticateDriveRedirect,
 } from './lib/firebase';
 import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, getDocs, limit, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -494,12 +494,24 @@ export default function App() {
             setIsAuthenticated(true);
             fetchAllFolders();
           } else {
+            let code: string | undefined;
+            try {
+              const j = (await res.json()) as { code?: string };
+              code = j?.code;
+            } catch {
+              /* ignore */
+            }
+            if (code === 'MISSING_DRIVE_SCOPE') {
+              console.warn(
+                '[OAuth] Signed in with Google; Drive permission pending — tap Connect Drive once more.'
+              );
+            }
             const driveOk = await checkAuthStatus();
             if (driveOk) fetchAllFolders();
           }
         } else {
           console.warn(
-            '[Firebase] Signed in after redirect but no Google OAuth access token (Drive cookie cannot be set). If Connect Drive keeps looping, try Chrome on Android or desktop.'
+            '[Firebase] Signed in after redirect but no OAuth access token in credential (Safari/WebKit). Tap Connect Drive to finish.'
           );
           const driveOk = await checkAuthStatus();
           if (driveOk) fetchAllFolders();
@@ -702,7 +714,14 @@ export default function App() {
 
       const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       if (isMobile) {
-        await signInWithDriveRedirect();
+        const u = auth?.currentUser ?? currentUser;
+        if (!u) {
+          console.log('[OAuth] Mobile step 1: Firebase Google sign-in redirect');
+          await signInWithGoogleRedirect();
+        } else {
+          console.log('[OAuth] Mobile step 2: Drive consent redirect');
+          await reauthenticateDriveRedirect(u);
+        }
         return;
       }
       // Small delay to ensure UI updates
